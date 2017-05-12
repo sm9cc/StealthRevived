@@ -1,0 +1,23 @@
+"Updater"
+{
+	"Information"
+	{
+		"Version"
+		{
+			"Latest"	"0.1"
+			"Previous"	"0.0"
+		}
+		
+		"Notes"	"First version."
+	}
+	
+	"Files"
+	{
+		"Plugin"	"Path_SM/plugins/StealthRevived.smx"
+		"Plugin"	"Path_SM/plugins/updater.smx"
+
+		"Source"	"Path_SM/scripting/StealthRevived.sp"
+		"Source"	"Path_SM/scripting/include/StealthRevived.inc"
+		"Source"	"Path_SM/scripting/include/autoexecconfig.inc"
+	}
+}

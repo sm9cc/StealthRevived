@@ -20,7 +20,7 @@
 #undef REQUIRE_PLUGIN
 #tryinclude <updater>
 
-#define UPDATE_URL    "https://raw.githubusercontent.com/SM91337/StealthRevived/master/addons/sourcemod/update.txt"
+#define UPDATE_URL    "https://bitbucket.org/SM91337/stealthrevived/raw/master/addons/sourcemod/update.txt"
 
 /****************************************************************************************************
 	DEFINES

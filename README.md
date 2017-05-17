@@ -11,7 +11,7 @@ Stealth Revived is a plugin which aims to help server admins catch cheaters by h
 * Blocks cheats with "Show spectator option"
 
 ### How does it work? ###
-* Simple join spectator while you have Admin Kick flag and you will vanish, Now you can easily spectate cheaters and they will never know!
+* Simple join spectator while you have Admin Kick flag (Or you can change it using the override 'admin_stealth') and you will vanish, Now you can easily spectate cheaters and they will never know!
 
 ### Will it support games other than CSGO? ###
-This is planned, but for now the development will focus around CSGO only until it is considered complete.
+It does partially, but the status rewrite for other games is not yet supported.

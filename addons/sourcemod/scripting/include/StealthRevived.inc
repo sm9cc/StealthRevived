@@ -21,8 +21,6 @@ public void __pl_stealthrevived_SetNTVOptional() {
 }
 #endif
 
-IN_ALT1
-
 /**
  * Returns if a a client is stealthed/
  *

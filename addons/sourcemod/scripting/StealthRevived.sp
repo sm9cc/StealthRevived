@@ -5,6 +5,13 @@
 *****************************************************************************************************
 	CHANGELOG: 
 			0.1 - First version.
+			0.2 - 
+				- Improved spectator blocking with SendProxy (If installed) - Credits to Chaosxk
+				- Make PTAH optional, sm_stealth_customstatus wont work in CSGO unless PTAH is installed until we find a way to rewrite status without dependencies.
+				- Only rewrite status if there is atleast 1 stealthed client.
+				- Improved late loading to account for admins already in spectator.
+				- Improved support for other games, Still need to do the status rewrite for other games though.
+				- Improved status anti-spam.
 				
 *****************************************************************************************************
 *****************************************************************************************************
@@ -13,19 +20,22 @@
 #include <StealthRevived>
 #include <sdktools>
 #include <sdkhooks>
-#include <ptah>
 #include <regex>
 #include <autoexecconfig>
 
 #undef REQUIRE_PLUGIN
 #tryinclude <updater>
 
+#undef REQUIRE_EXTENSIONS
+#tryinclude <sendproxy>
+#tryinclude <ptah>
+
 #define UPDATE_URL    "https://bitbucket.org/SM91337/stealthrevived/raw/master/addons/sourcemod/update.txt"
 
 /****************************************************************************************************
 	DEFINES
 *****************************************************************************************************/
-#define PL_VERSION "0.1"
+#define PL_VERSION "0.2"
 #define LoopValidPlayers(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1))
 #define LoopValidClients(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1, false))
 
@@ -64,6 +74,7 @@ bool g_bStealthed[MAXPLAYERS + 1] = false;
 bool g_bWindows = false;
 bool g_bRewriteStatus = false;
 bool g_bFakeDC = false;
+bool g_bSendProxy = false;
 
 /****************************************************************************************************
 	INTS.
@@ -83,17 +94,6 @@ char g_szMaxPlayers[32];
 
 public void OnPluginStart()
 {
-	LoopValidPlayers(iClient) {
-		OnClientPutInServer(iClient);
-	}
-	
-	HookEvent("player_team", Event_PlayerTeam, EventHookMode_Pre);
-	PTaH(PTaH_ExecuteStringCommand, Hook, ExecuteStringCommand);
-	
-	g_cHostName = FindConVar("hostname");
-	g_cHostPort = FindConVar("hostport");
-	g_cHostIP = FindConVar("hostip");
-	
 	AutoExecConfig_SetFile("plugin.stealthrevived");
 	
 	g_cCustomStatus = AutoExecConfig_CreateConVar("sm_stealth_customstatus", "1", "Should the plugin rewrite status out? 0 = False, 1 = True", _, true, 0.0, true, 1.0);
@@ -107,23 +107,56 @@ public void OnPluginStart()
 	
 	AutoExecConfig_CleanFile(); AutoExecConfig_ExecuteFile();
 	
+	g_cHostName = FindConVar("hostname");
+	g_cHostPort = FindConVar("hostport");
+	g_cHostIP = FindConVar("hostip");
+	
 	#if defined _updater_included
 	if (LibraryExists("updater")) {
 		Updater_AddPlugin(UPDATE_URL);
 	}
 	#endif
-
+	
+	#if defined _PTaH_included
+	if (LibraryExists("PTaH")) {
+		PTaH(PTaH_ExecuteStringCommand, Hook, ExecuteStringCommand);
+	}
+	#endif
+	
+	g_bSendProxy = LibraryExists("sendproxy");
+	
+	AddCommandListener(Command_Status, "status");
+	HookEvent("player_team", Event_PlayerTeam, EventHookMode_Pre);
 	OnConfigsExecuted();
-}
-
-#if defined _updater_included
-public void OnLibraryAdded(const char[] szName)
-{
-	if (StrEqual(szName, "updater")) {
-		Updater_AddPlugin(UPDATE_URL);
+	
+	LoopValidPlayers(iClient) {
+		OnClientPutInServer(iClient);
+		
+		if (!IsClientStealthWorthy(iClient)) {
+			continue;
+		}
+		
+		if(GetClientTeam(iClient) < 2) {
+			g_bStealthed[iClient] = true;
+		}
 	}
 }
-#endif
+
+public void OnLibraryAdded(const char[] szName)
+{
+	if (StrEqual(szName, "updater", false)) {
+		Updater_AddPlugin(UPDATE_URL);
+	} else if (StrEqual(szName, "sendproxy", false)) {
+		g_bSendProxy = true;
+	}
+}
+
+public void OnLibraryRemoved(const char[] szName)
+{
+	if (StrEqual(szName, "sendproxy", false)) {
+		g_bSendProxy = false;
+	}
+}
 
 public APLRes AskPluginLoad2(Handle hNyself, bool bLate, char[] chError, int iErrMax)
 {
@@ -165,8 +198,31 @@ public void OnMapStart()
 	SDKHook(iPlayerManager, SDKHook_ThinkPost, Hook_PlayerManagerThinkPost);
 }
 
+public Action Command_Status(int iClient, const char[] szComman, int iArgs)
+{
+	if(g_iLastCommand[iClient] > -1 && GetTime() - g_iLastCommand[iClient] < g_iCmdInterval) {
+		return Plugin_Handled;
+	}
+	
+	if(!g_bRewriteStatus) {
+		return Plugin_Continue;
+	}
+	
+	if(GetStealthCount() < 1) {
+		return Plugin_Continue;
+	}
+	
+	ExecuteStringCommand(iClient, "status");
+	
+	return Plugin_Handled;
+}
+
 public Action ExecuteStringCommand(int iClient, char sMessage[1024])
 {
+	if(g_iLastCommand[iClient] > -1 && GetTime() - g_iLastCommand[iClient] < g_iCmdInterval) {
+		return Plugin_Handled;
+	}
+	
 	if(!g_bRewriteStatus) {
 		return Plugin_Continue;
 	}
@@ -180,12 +236,7 @@ public Action ExecuteStringCommand(int iClient, char sMessage[1024])
 		return Plugin_Continue;
 	}
 	
-	if(g_iLastCommand[iClient] > -1 && GetTime() - g_iLastCommand[iClient] < g_iCmdInterval) {
-		return Plugin_Handled;
-	}
-	
-	PrintCustomStatus(iClient);
-	return Plugin_Handled;
+	return PrintCustomStatus(iClient) ? Plugin_Handled : Plugin_Continue;
 }
 
 public Action Event_PlayerTeam(Event evEvent, char[] chEvent, bool bDontBroadcast)
@@ -202,8 +253,6 @@ public Action Event_PlayerTeam(Event evEvent, char[] chEvent, bool bDontBroadcas
 	
 	if (iTeam > 1) {
 		if (g_bStealthed[iClient]) {
-			// Client stealthed and joining a new team, lets block the message being printed to everyone else, but we will fire it to him to prevent client side glitches.
-			
 			g_bStealthed[iClient] = false;
 			
 			Event evFakeTeam = CreateEvent("player_team", true);
@@ -250,8 +299,15 @@ public Action Event_PlayerTeam(Event evEvent, char[] chEvent, bool bDontBroadcas
 	return Plugin_Handled;
 }
 
-public void OnClientPutInServer(int iClient) {
+public void OnClientPutInServer(int iClient) 
+{
 	SDKHook(iClient, SDKHook_SetTransmit, Hook_SetTransmit);
+	
+	#if defined _SENDPROXYMANAGER_INC_
+	if (g_bSendProxy) {
+		SendProxy_Hook(iClient, "m_hObserverTarget", Prop_Int, PropHook_CallBack);
+	}
+	#endif
 }
 
 public void OnEntityCreated(int iEntity, const char[] szClassName)
@@ -268,6 +324,19 @@ public void Hook_PlayerManagerThinkPost(int iEntity)
 	}
 }
 
+#if defined _SENDPROXYMANAGER_INC_
+public Action PropHook_CallBack(int iEntity, const char[] szPropName, int &iValue, int iElement)
+{
+	if (iEntity != iValue) {
+		return Plugin_Continue;
+	}
+	
+	iValue = g_bStealthed[iEntity] ? -1 : iValue;
+	
+	return Plugin_Changed;
+}
+#endif
+
 public Action Hook_SetTransmit(int iEntity, int iClient)
 {
 	if (iEntity == iClient) {
@@ -278,15 +347,21 @@ public Action Hook_SetTransmit(int iEntity, int iClient)
 		return Plugin_Continue;
 	}
 	
-	if (g_bStealthed[iEntity]) {
-		return Plugin_Handled;
+	if (!g_bStealthed[iEntity]) {
+		return Plugin_Continue;
 	}
 	
-	return Plugin_Continue;
+	return Plugin_Handled;
 }
 
-public void PrintCustomStatus(int iClient)
+stock bool PrintCustomStatus(int iClient)
 {
+	g_iLastCommand[iClient] = GetTime();
+	
+	if(GetStealthCount() < 1) {
+		return false;
+	}
+	
 	PrintToConsole(iClient, "hostname: %s", g_szHostName);
 	PrintToConsole(iClient, g_szVersion);
 	PrintToConsole(iClient, "udp/ip  : %s", g_szServerIP);
@@ -315,7 +390,8 @@ public void PrintCustomStatus(int iClient)
 	}
 	
 	PrintToConsole(iClient, "#end");
-	g_iLastCommand[iClient] = GetTime();
+	
+	return true;
 }
 
 public void CacheInformation(any anything)
@@ -425,6 +501,21 @@ stock int GetBotCount()
 	
 	LoopValidClients(iClient) {
 		if (!IsFakeClient(iClient)) {
+			continue;
+		}
+		
+		iCount++;
+	}
+	
+	return iCount;
+}
+
+stock int GetStealthCount()
+{
+	int iCount = 0;
+	
+	LoopValidClients(iClient) {
+		if (!g_bStealthed[iClient]) {
 			continue;
 		}
 		

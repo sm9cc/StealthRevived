@@ -4,12 +4,11 @@
 	{
 		"Version"
 		{
-			"Latest"	"0.3"
-			"Previous"	"0.2"
+			"Latest"	"0.4"
+			"Previous"	"0.3"
 		}
 		
-		"Notes"	"Fixed variables not being reset on client disconnect."
-		"Notes"	"Added intial TF2 support (Needs further testing)"
+		"Notes"	"Use SteamWorks or SteamTools for more accurate IP detection, If you have both installed then only SteamWorks is used."
 	}
 	
 	"Files"
@@ -19,6 +18,7 @@
 		"Source"	"Path_SM/scripting/StealthRevived.sp"
 		"Source"	"Path_SM/scripting/include/StealthRevived.inc"
 		"Source"	"Path_SM/scripting/include/autoexecconfig.inc"
-		"Source"	"Path_SM/scripting/include/sendproxy.inc"
+		"Source"	"Path_SM/scripting/include/steamtools.inc"
+		"Source"	"Path_SM/scripting/include/SteamWorks.inc"
 	}
 }

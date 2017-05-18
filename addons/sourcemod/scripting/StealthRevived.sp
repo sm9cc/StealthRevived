@@ -1,5 +1,5 @@
 /****************************************************************************************************
-	[CSGO/Others Soon™] Stealth Revived
+	Stealth Revived
 *****************************************************************************************************
 
 *****************************************************************************************************
@@ -15,6 +15,8 @@
 			0.3 - 
 				- Fixed variables not being reset on client disconnect.
 				- Added intial TF2 support (Needs further testing)
+			0.4 - 
+				- Use SteamWorks or SteamTools for more accurate IP detection, If you have both installed then only SteamWorks is used.
 				
 *****************************************************************************************************
 *****************************************************************************************************
@@ -32,13 +34,15 @@
 #undef REQUIRE_EXTENSIONS
 #tryinclude <sendproxy>
 #tryinclude <ptah>
+#tryinclude <SteamWorks>
+#tryinclude <SteamTools>
 
 #define UPDATE_URL    "https://bitbucket.org/SM91337/stealthrevived/raw/master/addons/sourcemod/update.txt"
 
 /****************************************************************************************************
 	DEFINES
 *****************************************************************************************************/
-#define PL_VERSION "0.3"
+#define PL_VERSION "0.4"
 #define LoopValidPlayers(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1))
 #define LoopValidClients(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1, false))
 
@@ -543,14 +547,14 @@ stock bool PrintCustomStatus(int iClient)
 				PrintToConsole(iClient, "# %6d %-19s %19s                     active", GetClientUserId(i), szName, szAuthId);
 			}
 		} else {
-			if (IsFakeClient(i)) {
-				PrintToConsole(iClient, "#%d %s BOT active %d", i, szName, g_iTickRate);
-			} else {
+			if (!IsFakeClient(i)) {
 				GetClientAuthId(i, AuthId_Steam2, szAuthId, 64);
 				GetClientInfo(i, "rate", szRate, 9);
 				FormatShortTime(RoundToFloor(GetClientTime(i)), szTime, 9);
 				
 				PrintToConsole(iClient, "# %d %d %s %s %s %d %d active %s", GetClientUserId(i), i, szName, szAuthId, szTime, GetPing(i), GetLoss(i), szRate);
+			} else {
+				PrintToConsole(iClient, "#%d %s BOT active %d", i, szName, g_iTickRate);
 			}
 			
 			PrintToConsole(iClient, "#end");
@@ -562,18 +566,38 @@ stock bool PrintCustomStatus(int iClient)
 
 public void CacheInformation(any anything)
 {
-	bool bSecure = false;
+	bool bSecure = false; bool bSteamWorks; bool bSteamTools;
 	char szStatus[512]; char szBuffer[512]; ServerCommandEx(szStatus, sizeof(szStatus), "status");
 	
 	g_iTickRate = RoundToZero(1.0 / GetTickInterval());
 	
 	g_bWindows = StrContains(szStatus, "os      :  Windows", true) != -1;
 	g_cHostName.GetString(g_szHostName, sizeof(g_szHostName));
-	
-	int iServerIP = g_cHostIP.IntValue;
 	g_iServerPort = g_cHostPort.IntValue;
 	
-	Format(g_szServerIP, sizeof(g_szServerIP), "%d.%d.%d.%d", iServerIP >>> 24 & 255, iServerIP >>> 16 & 255, iServerIP >>> 8 & 255, iServerIP & 255);
+	#if defined _SteamWorks_Included || defined _steamtools_included
+	bSteamWorks = LibraryExists("SteamWorks");
+	bSteamTools = LibraryExists("SteamTools");
+	
+	if(bSteamWorks || bSteamTools) {
+		int iSIP[4];
+		
+		if(bSteamWorks) {
+			SteamWorks_GetPublicIP(iSIP);
+			bSecure = SteamWorks_IsVACEnabled();
+		} else if(bSteamTools) {
+			Steam_GetPublicIP(iSIP);
+			bSecure = Steam_IsVACEnabled();
+		}
+		
+		Format(g_szServerIP, sizeof(g_szServerIP), "%d.%d.%d.%d", iSIP[0], iSIP[1], iSIP[2], iSIP[3]);
+	}
+	#endif
+	
+	if(!bSteamWorks && !bSteamTools) {
+		int iServerIP = g_cHostIP.IntValue;
+		Format(g_szServerIP, sizeof(g_szServerIP), "%d.%d.%d.%d", iServerIP >>> 24 & 255, iServerIP >>> 16 & 255, iServerIP >>> 8 & 255, iServerIP & 255);
+	}
 	
 	Regex rRegex = null;
 	int iMatches = 0;
@@ -584,11 +608,16 @@ public void CacheInformation(any anything)
 		iMatches = rRegex.Match(szStatus);
 		
 		if (iMatches < 1) {
-			delete rRegex; bSecure = false;
+			delete rRegex; 
+			
+			if(!bSteamWorks && !bSteamTools) {
+				bSecure = false;
+			}
+			
 			rRegex = CompileRegex("version (.*?) insecure");
 			iMatches = rRegex.Match(szStatus);
 			
-		} else {
+		} else if(!bSteamWorks && !bSteamTools) {
 			bSecure = true;
 		}
 		

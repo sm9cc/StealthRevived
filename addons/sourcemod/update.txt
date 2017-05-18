@@ -4,16 +4,12 @@
 	{
 		"Version"
 		{
-			"Latest"	"0.2"
-			"Previous"	"0.1"
+			"Latest"	"0.3"
+			"Previous"	"0.2"
 		}
 		
-		"Notes"	"Improved spectator blocking with SendProxy (If installed) - Credits to Chaosxk"
-		"Notes"	"Make PTAH optional, sm_stealth_customstatus wont work in CSGO unless PTAH is installed until we find a way to rewrite status without dependencies."
-		"Notes"	"Only rewrite status if there is atleast 1 stealthed client."
-		"Notes"	"Improved late loading to account for admins already in spectator."
-		"Notes"	"Improved support for other games, Still need to do the status rewrite for other games though."
-		"Notes"	"Improved status anti-spam."
+		"Notes"	"Fixed variables not being reset on client disconnect."
+		"Notes"	"Added intial TF2 support (Needs further testing)"
 	}
 	
 	"Files"

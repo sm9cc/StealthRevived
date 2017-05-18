@@ -12,6 +12,9 @@
 				- Improved late loading to account for admins already in spectator.
 				- Improved support for other games, Still need to do the status rewrite for other games though.
 				- Improved status anti-spam.
+			0.3 - 
+				- Fixed variables not being reset on client disconnect.
+				- Added intial TF2 support (Needs further testing)
 				
 *****************************************************************************************************
 *****************************************************************************************************
@@ -35,7 +38,7 @@
 /****************************************************************************************************
 	DEFINES
 *****************************************************************************************************/
-#define PL_VERSION "0.2"
+#define PL_VERSION "0.3"
 #define LoopValidPlayers(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1))
 #define LoopValidClients(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1, false))
 
@@ -51,7 +54,7 @@
 public Plugin myinfo = 
 {
 	name = "Stealth Revived", 
-	author = "SM9();",
+	author = "SM9();", 
 	description = "A proper stealth plugin that actually works.", 
 	version = PL_VERSION, 
 	url = "http://www.fragdeluxe.com/"
@@ -63,6 +66,7 @@ public Plugin myinfo =
 ConVar g_cHostName = null;
 ConVar g_cHostPort = null;
 ConVar g_cHostIP = null;
+ConVar g_cTags = null;
 ConVar g_cCustomStatus = null;
 ConVar g_cFakeDisconnect = null;
 ConVar g_cCmdInterval = null;
@@ -75,22 +79,30 @@ bool g_bWindows = false;
 bool g_bRewriteStatus = false;
 bool g_bFakeDC = false;
 bool g_bSendProxy = false;
+bool g_bDataCached = false;
 
 /****************************************************************************************************
 	INTS.
 *****************************************************************************************************/
-int g_iLastCommand[MAXPLAYERS+1] = -1;
+int g_iLastCommand[MAXPLAYERS + 1] = -1;
 int g_iCmdInterval = 1;
 int g_iTickRate = 0;
+int g_iServerPort = 0;
+int g_iPlayerManager = -1;
+int g_iTF2Stats[10][6];
 
 /****************************************************************************************************
 	STRINGS.
 *****************************************************************************************************/
-char g_szVersion[32];
+char g_szVersion[128];
 char g_szHostName[128];
 char g_szServerIP[128];
 char g_szCurrentMap[128];
-char g_szMaxPlayers[32];
+char g_szMaxPlayers[128];
+char g_szGameName[128];
+char g_szAccount[128];
+char g_szSteamId[128];
+char g_szTags[512];
 
 public void OnPluginStart()
 {
@@ -110,6 +122,11 @@ public void OnPluginStart()
 	g_cHostName = FindConVar("hostname");
 	g_cHostPort = FindConVar("hostport");
 	g_cHostIP = FindConVar("hostip");
+	g_cTags = FindConVar("sv_tags");
+	
+	if (g_cTags != null) {
+		g_cTags.AddChangeHook(OnCvarChanged);
+	}
 	
 	#if defined _updater_included
 	if (LibraryExists("updater")) {
@@ -126,7 +143,6 @@ public void OnPluginStart()
 	g_bSendProxy = LibraryExists("sendproxy");
 	
 	AddCommandListener(Command_Status, "status");
-	HookEvent("player_team", Event_PlayerTeam, EventHookMode_Pre);
 	OnConfigsExecuted();
 	
 	LoopValidPlayers(iClient) {
@@ -136,9 +152,19 @@ public void OnPluginStart()
 			continue;
 		}
 		
-		if(GetClientTeam(iClient) < 2) {
+		if (GetClientTeam(iClient) < 2) {
 			g_bStealthed[iClient] = true;
 		}
+	}
+	
+	GetGameFolderName(g_szGameName, sizeof(g_szGameName));
+	
+	HookEvent("player_team", Event_PlayerTeam, EventHookMode_Pre);
+	
+	if (StrEqual(g_szGameName, "tf", false)) {
+		HookEventEx("player_spawn", TF2Events_CallBack);
+		HookEventEx("player_escort_score", TF2Events_CallBack);
+		HookEventEx("player_death", TF2Events_CallBack);
 	}
 }
 
@@ -169,48 +195,60 @@ public void OnCvarChanged(ConVar cConVar, const char[] szOldValue, const char[] 
 {
 	if (cConVar == g_cCustomStatus) {
 		g_bRewriteStatus = view_as<bool>(StringToInt(szNewValue));
-	} else if(cConVar == g_cFakeDisconnect) {
+	} else if (cConVar == g_cFakeDisconnect) {
 		g_bFakeDC = view_as<bool>(StringToInt(szNewValue));
-	} else if(cConVar == g_cCmdInterval) {
+	} else if (cConVar == g_cCmdInterval) {
 		g_iCmdInterval = StringToInt(szNewValue);
+	} else if (cConVar == g_cTags) {
+		strcopy(g_szTags, 512, szNewValue);
 	}
 }
 
-public void OnConfigsExecuted() 
+public void OnConfigsExecuted()
 {
-	RequestFrame(CacheInformation, -1);
-	
 	g_bRewriteStatus = g_cCustomStatus.BoolValue;
 	g_bFakeDC = g_cFakeDisconnect.BoolValue;
 	g_iCmdInterval = g_cCmdInterval.IntValue;
+	g_cTags.GetString(g_szTags, 512);
 }
 
-public void OnMapStart() 
+public void OnMapStart()
 {
 	GetCurrentMap(g_szCurrentMap, 128);
 	
-	int iPlayerManager = GetPlayerResourceEntity();
+	for (int i = 0; i < 10; i++) {
+		for (int y = 0; y < 6; y++) {
+			g_iTF2Stats[i][y] = 0;
+		}
+	}
 	
-	if (iPlayerManager == -1) {
+	g_iPlayerManager = GetPlayerResourceEntity();
+	
+	if (g_iPlayerManager == -1) {
 		return;
 	}
 	
-	SDKHook(iPlayerManager, SDKHook_ThinkPost, Hook_PlayerManagerThinkPost);
+	SDKHook(g_iPlayerManager, SDKHook_ThinkPost, Hook_PlayerManagerThinkPost);
 }
 
 public Action Command_Status(int iClient, const char[] szComman, int iArgs)
 {
-	if(g_iLastCommand[iClient] > -1 && GetTime() - g_iLastCommand[iClient] < g_iCmdInterval) {
+	if (iClient < 1) {
+		return Plugin_Continue;
+	}
+	
+	if (g_iLastCommand[iClient] > -1 && GetTime() - g_iLastCommand[iClient] < g_iCmdInterval) {
 		return Plugin_Handled;
 	}
 	
-	if(!g_bRewriteStatus) {
+	if (!g_bRewriteStatus) {
 		return Plugin_Continue;
 	}
 	
-	if(GetStealthCount() < 1) {
+	/*
+	if (GetStealthCount() < 1) {
 		return Plugin_Continue;
-	}
+	} */
 	
 	ExecuteStringCommand(iClient, "status");
 	
@@ -219,11 +257,11 @@ public Action Command_Status(int iClient, const char[] szComman, int iArgs)
 
 public Action ExecuteStringCommand(int iClient, char sMessage[1024])
 {
-	if(g_iLastCommand[iClient] > -1 && GetTime() - g_iLastCommand[iClient] < g_iCmdInterval) {
+	if (g_iLastCommand[iClient] > -1 && GetTime() - g_iLastCommand[iClient] < g_iCmdInterval) {
 		return Plugin_Handled;
 	}
 	
-	if(!g_bRewriteStatus) {
+	if (!g_bRewriteStatus) {
 		return Plugin_Continue;
 	}
 	
@@ -239,7 +277,7 @@ public Action ExecuteStringCommand(int iClient, char sMessage[1024])
 	return PrintCustomStatus(iClient) ? Plugin_Handled : Plugin_Continue;
 }
 
-public Action Event_PlayerTeam(Event evEvent, char[] chEvent, bool bDontBroadcast)
+public Action Event_PlayerTeam(Event evEvent, char[] szEvent, bool bDontBroadcast)
 {
 	int iUserId = evEvent.GetInt("userid");
 	int iClient = GetClientOfUserId(iUserId);
@@ -299,7 +337,54 @@ public Action Event_PlayerTeam(Event evEvent, char[] chEvent, bool bDontBroadcas
 	return Plugin_Handled;
 }
 
-public void OnClientPutInServer(int iClient) 
+public Action TF2Events_CallBack(Event evEvent, char[] szEvent, bool bDontBroadcast)
+{
+	int iEvent = -1;
+	
+	int iClassPlayer = -1;
+	int iClassAttacker = -1;
+	int iClassAssister = -1;
+	
+	if (StrEqual(szEvent, "player_spawn", false)) {
+		iClassPlayer = view_as<int>(TF2_GetPlayerClass(GetClientOfUserId(evEvent.GetInt("userid"))));
+		iEvent = TF_SR_Spawns;
+	} else if (StrEqual(szEvent, "player_escort_score", false)) {
+		iClassPlayer = view_as<int>(TF2_GetPlayerClass(evEvent.GetInt("player")));
+		iEvent = TF_SR_Points;
+	} else if (StrEqual(szEvent, "player_death", false)) {
+		iClassPlayer = view_as<int>(TF2_GetPlayerClass(GetClientOfUserId(evEvent.GetInt("userid"))));
+		iClassAttacker = view_as<int>(TF2_GetPlayerClass(GetClientOfUserId(evEvent.GetInt("attacker"))));
+		
+		int iAssister = GetClientOfUserId(evEvent.GetInt("assister"));
+		
+		if (iAssister > 0) {
+			iClassAssister = view_as<int>(TF2_GetPlayerClass(iAssister));
+		}
+		
+		iEvent = TF_SR_Deaths;
+	}
+	
+	switch (iEvent) {
+		case TF_SR_Spawns :  {
+			g_iTF2Stats[iClassPlayer][TF_SR_Spawns]++;
+		}
+		
+		case TF_SR_Points :  {
+			g_iTF2Stats[iClassPlayer][TF_SR_Points] += evEvent.GetInt("points");
+		}
+		
+		case TF_SR_Deaths :  {
+			g_iTF2Stats[iClassPlayer][TF_SR_Deaths]++;
+			g_iTF2Stats[iClassAttacker][TF_SR_Kills]++;
+			
+			if (iClassAssister > -1) {
+				g_iTF2Stats[iClassAssister][TF_SR_Assists]++;
+			}
+		}
+	}
+}
+
+public void OnClientPutInServer(int iClient)
 {
 	SDKHook(iClient, SDKHook_SetTransmit, Hook_SetTransmit);
 	
@@ -308,12 +393,23 @@ public void OnClientPutInServer(int iClient)
 		SendProxy_Hook(iClient, "m_hObserverTarget", Prop_Int, PropHook_CallBack);
 	}
 	#endif
+	
+	g_iLastCommand[iClient] = -1;
+	g_bStealthed[iClient] = false;
+}
+
+public void OnClientDisconnect(int iClient)
+{
+	g_iLastCommand[iClient] = -1;
+	g_bStealthed[iClient] = false;
 }
 
 public void OnEntityCreated(int iEntity, const char[] szClassName)
 {
-	if (StrEqual(szClassName, "cs_player_manager", false)) {
-		SDKHook(iEntity, SDKHook_ThinkPost, Hook_PlayerManagerThinkPost);
+	if (StrEqual(szClassName, "cs_player_manager", false) || StrEqual(szClassName, "tf_player_manager", false)) {
+		g_iPlayerManager = iEntity;
+		
+		SDKHook(g_iPlayerManager, SDKHook_ThinkPost, Hook_PlayerManagerThinkPost);
 	}
 }
 
@@ -358,38 +454,110 @@ stock bool PrintCustomStatus(int iClient)
 {
 	g_iLastCommand[iClient] = GetTime();
 	
-	if(GetStealthCount() < 1) {
+	/*
+	if (GetStealthCount() < 1) {
 		return false;
+	} */
+	
+	if (!g_bDataCached) {
+		CacheInformation(0);
 	}
 	
 	PrintToConsole(iClient, "hostname: %s", g_szHostName);
 	PrintToConsole(iClient, g_szVersion);
-	PrintToConsole(iClient, "udp/ip  : %s", g_szServerIP);
-	PrintToConsole(iClient, "os      : %s", g_bWindows ? "Windows" : "Linux");
-	PrintToConsole(iClient, "type    : community dedicated");
-	PrintToConsole(iClient, "map     : %s", g_szCurrentMap);
-	PrintToConsole(iClient, "players : %d humans, %d bots %s (not hibernating)\n", GetPlayerCount(), GetBotCount(), g_szMaxPlayers);
-	PrintToConsole(iClient, "# userid name uniqueid connected ping loss state rate");
 	
-	char szAuthId[64]; char szTime[9]; char szRate[9];
+	bool bTF2 = false;
+	
+	
+	if (!StrEqual(g_szGameName, "tf", false)) {
+		PrintToConsole(iClient, "udp/ip  : %s:%d", g_szServerIP, g_iServerPort);
+		PrintToConsole(iClient, "os      : %s", g_bWindows ? "Windows" : "Linux");
+		PrintToConsole(iClient, "type    : community dedicated");
+		PrintToConsole(iClient, "map     : %s", g_szCurrentMap);
+		PrintToConsole(iClient, "players : %d humans, %d bots %s (not hibernating)\n", GetPlayerCount(), GetBotCount(), g_szMaxPlayers);
+		PrintToConsole(iClient, "# userid name uniqueid connected ping loss state rate");
+	} else {
+		bTF2 = true;
+		
+		PrintToConsole(iClient, "udp/ip  : %s:%d  (public ip: %s)", g_szServerIP, g_iServerPort, g_szServerIP);
+		PrintToConsole(iClient, g_szSteamId);
+		PrintToConsole(iClient, g_szAccount);
+		PrintToConsole(iClient, "map     : %s at: 0 x, 0 y, 0 z", g_szCurrentMap);
+		PrintToConsole(iClient, "tags    : %s", g_szTags);
+		PrintToConsole(iClient, "players : %d humans, %d bots %s", GetPlayerCount(), GetBotCount(), g_szMaxPlayers);
+		PrintToConsole(iClient, "edicts  : %d used of 2048 max", GetEntityCount());
+		PrintToConsole(iClient, "         Spawns Points Kills Deaths Assists");
+		
+		PrintToConsole(iClient, "Scout         %d      %d     %d      %d       %d", 
+			g_iTF2Stats[TFClass_Scout][TF_SR_Spawns], g_iTF2Stats[TFClass_Scout][TF_SR_Points], g_iTF2Stats[TFClass_Scout][TF_SR_Kills], 
+			g_iTF2Stats[TFClass_Scout][TF_SR_Deaths], g_iTF2Stats[TFClass_Scout][TF_SR_Assists]);
+		
+		PrintToConsole(iClient, "Sniper        %d      %d     %d      %d       %d", 
+			g_iTF2Stats[TFClass_Sniper][TF_SR_Spawns], g_iTF2Stats[TFClass_Sniper][TF_SR_Points], g_iTF2Stats[TFClass_Sniper][TF_SR_Kills], 
+			g_iTF2Stats[TFClass_Sniper][TF_SR_Deaths], g_iTF2Stats[TFClass_Sniper][TF_SR_Assists]);
+		
+		PrintToConsole(iClient, "Soldier       %d      %d     %d      %d       %d", 
+			g_iTF2Stats[TFClass_Soldier][TF_SR_Spawns], g_iTF2Stats[TFClass_Soldier][TF_SR_Points], g_iTF2Stats[TFClass_Soldier][TF_SR_Kills], 
+			g_iTF2Stats[TFClass_Soldier][TF_SR_Deaths], g_iTF2Stats[TFClass_Soldier][TF_SR_Assists]);
+		
+		PrintToConsole(iClient, "Demoman       %d      %d     %d      %d       %d", 
+			g_iTF2Stats[TFClass_DemoMan][TF_SR_Spawns], g_iTF2Stats[TFClass_DemoMan][TF_SR_Points], g_iTF2Stats[TFClass_DemoMan][TF_SR_Kills], 
+			g_iTF2Stats[TFClass_DemoMan][TF_SR_Deaths], g_iTF2Stats[TFClass_DemoMan][TF_SR_Assists]);
+		
+		PrintToConsole(iClient, "Medic         %d      %d     %d      %d       %d", 
+			g_iTF2Stats[TFClass_Medic][TF_SR_Spawns], g_iTF2Stats[TFClass_Medic][TF_SR_Points], g_iTF2Stats[TFClass_Medic][TF_SR_Kills], 
+			g_iTF2Stats[TFClass_Medic][TF_SR_Deaths], g_iTF2Stats[TFClass_Medic][TF_SR_Assists]);
+		
+		PrintToConsole(iClient, "Heavy         %d      %d     %d      %d       %d", 
+			g_iTF2Stats[TFClass_Heavy][TF_SR_Spawns], g_iTF2Stats[TFClass_Heavy][TF_SR_Points], g_iTF2Stats[TFClass_Heavy][TF_SR_Kills], 
+			g_iTF2Stats[TFClass_Heavy][TF_SR_Deaths], g_iTF2Stats[TFClass_Heavy][TF_SR_Assists]);
+		
+		PrintToConsole(iClient, "Pyro          %d      %d     %d      %d       %d", 
+			g_iTF2Stats[TFClass_Pyro][TF_SR_Spawns], g_iTF2Stats[TFClass_Pyro][TF_SR_Points], g_iTF2Stats[TFClass_Pyro][TF_SR_Kills], 
+			g_iTF2Stats[TFClass_Pyro][TF_SR_Deaths], g_iTF2Stats[TFClass_Pyro][TF_SR_Assists]);
+		
+		PrintToConsole(iClient, "Spy           %d      %d     %d      %d       %d", 
+			g_iTF2Stats[TFClass_Spy][TF_SR_Spawns], g_iTF2Stats[TFClass_Spy][TF_SR_Points], g_iTF2Stats[TFClass_Spy][TF_SR_Kills], 
+			g_iTF2Stats[TFClass_Spy][TF_SR_Deaths], g_iTF2Stats[TFClass_Spy][TF_SR_Assists]);
+		
+		PrintToConsole(iClient, "Engineer      %d      %d     %d      %d       %d\n", 
+			g_iTF2Stats[TFClass_Engineer][TF_SR_Spawns], g_iTF2Stats[TFClass_Engineer][TF_SR_Points], g_iTF2Stats[TFClass_Engineer][TF_SR_Kills], 
+			g_iTF2Stats[TFClass_Engineer][TF_SR_Deaths], g_iTF2Stats[TFClass_Engineer][TF_SR_Assists]);
+		
+		PrintToConsole(iClient, "# userid name                uniqueid            connected ping loss state");
+	}
+	
+	char szAuthId[64]; char szTime[9]; char szRate[9]; char szName[MAX_NAME_LENGTH];
 	
 	LoopValidClients(i) {
 		if (g_bStealthed[i]) {
 			continue;
 		}
 		
-		if (IsFakeClient(i)) {
-			PrintToConsole(iClient, "#%d \"%N\" BOT active %d", i, i, g_iTickRate);
+		Format(szName, sizeof(szName), "\"%N\"", i);
+		
+		if (bTF2) {
+			GetClientAuthId(i, AuthId_Steam3, szAuthId, 64);
+			if (!IsFakeClient(i)) {
+				FormatShortTime(RoundToFloor(GetClientTime(i)), szTime, 9);
+				PrintToConsole(iClient, "# %6d %-19s %19s %9s %4d %4d active", GetClientUserId(i), szName, szAuthId, szTime, GetPing(i), GetLoss(i));
+			} else {
+				PrintToConsole(iClient, "# %6d %-19s %19s                     active", GetClientUserId(i), szName, szAuthId);
+			}
 		} else {
-			GetClientAuthId(i, AuthId_Steam2, szAuthId, 64);
-			GetClientInfo(i, "rate", szRate, 9);
-			FormatShortTime(RoundToFloor(GetClientTime(i)), szTime, 9);
+			if (IsFakeClient(i)) {
+				PrintToConsole(iClient, "#%d %s BOT active %d", i, szName, g_iTickRate);
+			} else {
+				GetClientAuthId(i, AuthId_Steam2, szAuthId, 64);
+				GetClientInfo(i, "rate", szRate, 9);
+				FormatShortTime(RoundToFloor(GetClientTime(i)), szTime, 9);
+				
+				PrintToConsole(iClient, "# %d %d %s %s %s %d %d active %s", GetClientUserId(i), i, szName, szAuthId, szTime, GetPing(i), GetLoss(i), szRate);
+			}
 			
-			PrintToConsole(iClient, "# %d %d \"%N\" %s %s %d %d active %s", GetClientUserId(i), i, i, szAuthId, szTime, GetPing(i), GetLoss(i), szRate);
+			PrintToConsole(iClient, "#end");
 		}
 	}
-	
-	PrintToConsole(iClient, "#end");
 	
 	return true;
 }
@@ -405,58 +573,81 @@ public void CacheInformation(any anything)
 	g_cHostName.GetString(g_szHostName, sizeof(g_szHostName));
 	
 	int iServerIP = g_cHostIP.IntValue;
-	int iServerPort = g_cHostPort.IntValue;
+	g_iServerPort = g_cHostPort.IntValue;
 	
-	Format(g_szServerIP, sizeof(g_szServerIP), "%d.%d.%d.%d:%d", iServerIP >>> 24 & 255, iServerIP >>> 16 & 255, iServerIP >>> 8 & 255, iServerIP & 255, iServerPort);
+	Format(g_szServerIP, sizeof(g_szServerIP), "%d.%d.%d.%d", iServerIP >>> 24 & 255, iServerIP >>> 16 & 255, iServerIP >>> 8 & 255, iServerIP & 255);
 	
-	Regex rRegex = CompileRegex("version (.*?) secure");
-	int iMatches = rRegex.Match(szStatus);
+	Regex rRegex = null;
+	int iMatches = 0;
 	
-	if (iMatches < 1) {
-		delete rRegex; bSecure = false;
-		rRegex = CompileRegex("version (.*?) insecure");
+	if (StrEqual(g_szGameName, "csgo", false)) {
+		rRegex = CompileRegex("version (.*?) secure");
+		
 		iMatches = rRegex.Match(szStatus);
 		
-	} else {
-		bSecure = true;
-	}
-	
-	if (iMatches < 1) {
+		if (iMatches < 1) {
+			delete rRegex; bSecure = false;
+			rRegex = CompileRegex("version (.*?) insecure");
+			iMatches = rRegex.Match(szStatus);
+			
+		} else {
+			bSecure = true;
+		}
+		
+		if (iMatches > 0) {
+			rRegex.GetSubString(0, szBuffer, sizeof(szBuffer));
+		}
+		
 		delete rRegex;
-		return;
-	}
-	
-	if (!rRegex.GetSubString(0, szBuffer, sizeof(szBuffer))) {
+		
+		char szSplit[2][64];
+		
+		if (ExplodeString(szBuffer, "/", szSplit, 2, 64) < 1) {
+			return;
+		}
+		
+		Format(g_szVersion, sizeof(g_szVersion), "%s %s", szSplit[0], bSecure ? "secure" : "insecure");
+	} else if (StrEqual(g_szGameName, "tf", false)) {
+		rRegex = CompileRegex("version.*");
+		iMatches = rRegex.Match(szStatus);
+		
+		if (iMatches > 0) {
+			rRegex.GetSubString(0, g_szVersion, sizeof(g_szVersion));
+		}
+		
 		delete rRegex;
-		return;
+		
+		rRegex = CompileRegex("account.*");
+		iMatches = rRegex.Match(szStatus);
+		
+		if (iMatches > 0) {
+			rRegex.GetSubString(0, g_szAccount, sizeof(g_szAccount));
+		}
+		
+		delete rRegex;
+		
+		rRegex = CompileRegex("steamid.*");
+		iMatches = rRegex.Match(szStatus);
+		
+		if (iMatches > 0) {
+			rRegex.GetSubString(0, g_szSteamId, sizeof(g_szSteamId));
+		}
+		
+		delete rRegex;
 	}
-	
-	delete rRegex;
-	
-	char szSplit[2][64];
-	
-	if (ExplodeString(szBuffer, "/", szSplit, 2, 64) < 1) {
-		return;
-	}
-	
-	Format(g_szVersion, sizeof(g_szVersion), "%s %s", szSplit[0], bSecure ? "secure" : "insecure");
 	
 	rRegex = CompileRegex("\\((.*? max)\\)");
 	iMatches = rRegex.Match(szStatus);
 	
-	if (iMatches < 1) {
-		delete rRegex;
-		return;
-	}
-	
-	if (!rRegex.GetSubString(1, szBuffer, sizeof(szBuffer))) {
-		delete rRegex;
-		return;
+	if (iMatches > 0) {
+		rRegex.GetSubString(1, szBuffer, sizeof(szBuffer));
 	}
 	
 	delete rRegex;
 	
 	Format(g_szMaxPlayers, sizeof(g_szMaxPlayers), "(%s)", szBuffer);
+	
+	g_bDataCached = true;
 }
 
 stock bool IsValidClient(int iClient, bool bIgnoreBots = true)
@@ -537,6 +728,10 @@ stock int GetPing(int iClient)
 	return RoundFloat(fPing);
 }
 
+stock TFClassType TF2_GetPlayerClass(int iClient) {
+	return view_as<TFClassType>(GetEntProp(iClient, Prop_Send, "m_iClass"));
+}
+
 // Thanks Necavi - https://forums.alliedmods.net/showthread.php?p=1796351
 stock void FormatShortTime(int iTime, char[] szOut, int iSize)
 {
@@ -554,9 +749,9 @@ stock void FormatShortTime(int iTime, char[] szOut, int iSize)
 	}
 }
 
-public int Native_IsClientStealthed(Handle hPlugin, int iNumParams) 
+public int Native_IsClientStealthed(Handle hPlugin, int iNumParams)
 {
 	int iClient = GetNativeCell(1);
 	
 	return g_bStealthed[iClient];
-}
+} 

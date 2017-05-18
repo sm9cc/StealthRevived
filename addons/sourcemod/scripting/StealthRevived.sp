@@ -245,10 +245,9 @@ public Action Command_Status(int iClient, const char[] szComman, int iArgs)
 		return Plugin_Continue;
 	}
 	
-	/*
 	if (GetStealthCount() < 1) {
 		return Plugin_Continue;
-	} */
+	}
 	
 	ExecuteStringCommand(iClient, "status");
 	
@@ -454,10 +453,9 @@ stock bool PrintCustomStatus(int iClient)
 {
 	g_iLastCommand[iClient] = GetTime();
 	
-	/*
 	if (GetStealthCount() < 1) {
 		return false;
-	} */
+	}
 	
 	if (!g_bDataCached) {
 		CacheInformation(0);

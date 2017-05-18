@@ -1,4 +1,4 @@
-# [CSGO/Others Soon™] Stealth Revived #
+# Stealth Revived #
 
 *A proper stealth plugin that actually works.
 *

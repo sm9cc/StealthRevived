@@ -17,6 +17,10 @@
 				- Added intial TF2 support (Needs further testing)
 			0.4 - 
 				- Use SteamWorks or SteamTools for more accurate IP detection, If you have both installed then only SteamWorks is used.
+			0.5 - 
+				- Fix console ending loop (Thanks Bara for report)
+				- Fix error spam in TF2 (Thanks rengo)
+				- Fixed TF2 disconnect reason (Thanks Drixevel)
 				
 *****************************************************************************************************
 *****************************************************************************************************
@@ -42,7 +46,7 @@
 /****************************************************************************************************
 	DEFINES
 *****************************************************************************************************/
-#define PL_VERSION "0.4"
+#define PL_VERSION "0.5"
 #define LoopValidPlayers(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1))
 #define LoopValidClients(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1, false))
 
@@ -327,7 +331,7 @@ public Action Event_PlayerTeam(Event evEvent, char[] szEvent, bool bDontBroadcas
 			char szAuthId[64]; GetClientAuthId(iClient, AuthId_Steam2, szAuthId, 64);
 			
 			evFakeDC.SetInt("userid", iUserId);
-			evFakeDC.SetString("reason", "Disconnect");
+			evFakeDC.SetString("reason", StrEqual(g_szGameName, "csgo", false) ? "Disconnect" : "Disconnect by user");
 			evFakeDC.SetString("name", szName);
 			evFakeDC.SetString("networkid", szAuthId);
 			evFakeDC.SetInt("bot", false);
@@ -556,9 +560,11 @@ stock bool PrintCustomStatus(int iClient)
 			} else {
 				PrintToConsole(iClient, "#%d %s BOT active %d", i, szName, g_iTickRate);
 			}
-			
-			PrintToConsole(iClient, "#end");
 		}
+	}
+	
+	if(!bTF2) {
+		PrintToConsole(iClient, "#end");
 	}
 	
 	return true;
@@ -755,7 +761,16 @@ stock int GetPing(int iClient)
 	return RoundFloat(fPing);
 }
 
-stock TFClassType TF2_GetPlayerClass(int iClient) {
+stock TFClassType TF2_GetPlayerClass(int iClient) 
+{
+	if(!IsValidClient(iClient, false)) {
+		return view_as<TFClassType>(-1);
+	}
+	
+	if(!HasEntProp(iClient, Prop_Send, "m_iClass")) {
+		return view_as<TFClassType>(-1);
+	}
+	
 	return view_as<TFClassType>(GetEntProp(iClient, Prop_Send, "m_iClass"));
 }
 

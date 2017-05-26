@@ -4,13 +4,13 @@
 	{
 		"Version"
 		{
-			"Latest"	"0.5"
-			"Previous"	"0.4"
+			"Latest"	"0.6"
+			"Previous"	"0.5"
 		}
 		
-		"Notes"	"Fix console ending loop (Thanks Bara for report)"
-		"Notes"	"Fix error spam in TF2 (Thanks rengo)"
-		"Notes"	"Fixed TF2 disconnect reason (Thanks Drixevel)"
+		"Notes"	"Fix more error spam scenarios (Thanks rengo)"
+		"Notes"	"Correct TF2 disconnect reason."
+		"Notes"	"Misc code changes."
 	}
 	
 	"Files"

@@ -21,6 +21,10 @@
 				- Fix console ending loop (Thanks Bara for report)
 				- Fix error spam in TF2 (Thanks rengo)
 				- Fixed TF2 disconnect reason (Thanks Drixevel)
+			0.6 - 
+				- Fix more error spam scenarios (Thanks rengo)
+				- Correct TF2 disconnect reason.
+				- Misc code changes.
 				
 *****************************************************************************************************
 *****************************************************************************************************
@@ -46,7 +50,7 @@
 /****************************************************************************************************
 	DEFINES
 *****************************************************************************************************/
-#define PL_VERSION "0.5"
+#define PL_VERSION "0.6"
 #define LoopValidPlayers(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1))
 #define LoopValidClients(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1, false))
 
@@ -331,7 +335,7 @@ public Action Event_PlayerTeam(Event evEvent, char[] szEvent, bool bDontBroadcas
 			char szAuthId[64]; GetClientAuthId(iClient, AuthId_Steam2, szAuthId, 64);
 			
 			evFakeDC.SetInt("userid", iUserId);
-			evFakeDC.SetString("reason", StrEqual(g_szGameName, "csgo", false) ? "Disconnect" : "Disconnect by user");
+			evFakeDC.SetString("reason", StrEqual(g_szGameName, "csgo", false) ? "Disconnect" : "Disconnect by user.");
 			evFakeDC.SetString("name", szName);
 			evFakeDC.SetString("networkid", szAuthId);
 			evFakeDC.SetInt("bot", false);
@@ -347,44 +351,47 @@ public Action Event_PlayerTeam(Event evEvent, char[] szEvent, bool bDontBroadcas
 public Action TF2Events_CallBack(Event evEvent, char[] szEvent, bool bDontBroadcast)
 {
 	int iEvent = -1;
-	
 	int iClassPlayer = -1;
 	int iClassAttacker = -1;
 	int iClassAssister = -1;
 	
 	if (StrEqual(szEvent, "player_spawn", false)) {
-		iClassPlayer = view_as<int>(TF2_GetPlayerClass(GetClientOfUserId(evEvent.GetInt("userid"))));
+		iClassPlayer = TF2_GetPlayerClass(GetClientOfUserId(evEvent.GetInt("userid")));
 		iEvent = TF_SR_Spawns;
 	} else if (StrEqual(szEvent, "player_escort_score", false)) {
-		iClassPlayer = view_as<int>(TF2_GetPlayerClass(evEvent.GetInt("player")));
+		iClassPlayer = TF2_GetPlayerClass(evEvent.GetInt("player"));
 		iEvent = TF_SR_Points;
 	} else if (StrEqual(szEvent, "player_death", false)) {
-		iClassPlayer = view_as<int>(TF2_GetPlayerClass(GetClientOfUserId(evEvent.GetInt("userid"))));
-		iClassAttacker = view_as<int>(TF2_GetPlayerClass(GetClientOfUserId(evEvent.GetInt("attacker"))));
-		
-		int iAssister = GetClientOfUserId(evEvent.GetInt("assister"));
-		
-		if (iAssister > 0) {
-			iClassAssister = view_as<int>(TF2_GetPlayerClass(iAssister));
-		}
+		iClassPlayer = TF2_GetPlayerClass(GetClientOfUserId(evEvent.GetInt("userid")));
+		iClassAttacker = TF2_GetPlayerClass(GetClientOfUserId(evEvent.GetInt("attacker")));
+		iClassAssister = TF2_GetPlayerClass(GetClientOfUserId(evEvent.GetInt("assister")));
 		
 		iEvent = TF_SR_Deaths;
 	}
 	
 	switch (iEvent) {
 		case TF_SR_Spawns :  {
-			g_iTF2Stats[iClassPlayer][TF_SR_Spawns]++;
+			if (TF2_IsValidClass(iClassPlayer)) {
+				g_iTF2Stats[iClassPlayer][TF_SR_Spawns]++;
+			}
 		}
 		
 		case TF_SR_Points :  {
-			g_iTF2Stats[iClassPlayer][TF_SR_Points] += evEvent.GetInt("points");
+			if (TF2_IsValidClass(iClassPlayer)) {
+				g_iTF2Stats[iClassPlayer][TF_SR_Points] += evEvent.GetInt("points");
+			}
 		}
 		
 		case TF_SR_Deaths :  {
-			g_iTF2Stats[iClassPlayer][TF_SR_Deaths]++;
-			g_iTF2Stats[iClassAttacker][TF_SR_Kills]++;
+			if (TF2_IsValidClass(iClassPlayer)) {
+				g_iTF2Stats[iClassPlayer][TF_SR_Deaths]++;
+			}
 			
-			if (iClassAssister > -1) {
+			if (TF2_IsValidClass(iClassAttacker)) {
+				g_iTF2Stats[iClassAttacker][TF_SR_Kills]++;
+			}
+			
+			if (TF2_IsValidClass(iClassAssister)) {
 				g_iTF2Stats[iClassAssister][TF_SR_Assists]++;
 			}
 		}
@@ -563,7 +570,7 @@ stock bool PrintCustomStatus(int iClient)
 		}
 	}
 	
-	if(!bTF2) {
+	if (!bTF2) {
 		PrintToConsole(iClient, "#end");
 	}
 	
@@ -585,13 +592,13 @@ public void CacheInformation(any anything)
 	bSteamWorks = LibraryExists("SteamWorks");
 	bSteamTools = LibraryExists("SteamTools");
 	
-	if(bSteamWorks || bSteamTools) {
+	if (bSteamWorks || bSteamTools) {
 		int iSIP[4];
 		
-		if(bSteamWorks) {
+		if (bSteamWorks) {
 			SteamWorks_GetPublicIP(iSIP);
 			bSecure = SteamWorks_IsVACEnabled();
-		} else if(bSteamTools) {
+		} else if (bSteamTools) {
 			Steam_GetPublicIP(iSIP);
 			bSecure = Steam_IsVACEnabled();
 		}
@@ -600,7 +607,7 @@ public void CacheInformation(any anything)
 	}
 	#endif
 	
-	if(!bSteamWorks && !bSteamTools) {
+	if (!bSteamWorks && !bSteamTools) {
 		int iServerIP = g_cHostIP.IntValue;
 		Format(g_szServerIP, sizeof(g_szServerIP), "%d.%d.%d.%d", iServerIP >>> 24 & 255, iServerIP >>> 16 & 255, iServerIP >>> 8 & 255, iServerIP & 255);
 	}
@@ -614,16 +621,16 @@ public void CacheInformation(any anything)
 		iMatches = rRegex.Match(szStatus);
 		
 		if (iMatches < 1) {
-			delete rRegex; 
+			delete rRegex;
 			
-			if(!bSteamWorks && !bSteamTools) {
+			if (!bSteamWorks && !bSteamTools) {
 				bSecure = false;
 			}
 			
 			rRegex = CompileRegex("version (.*?) insecure");
 			iMatches = rRegex.Match(szStatus);
 			
-		} else if(!bSteamWorks && !bSteamTools) {
+		} else if (!bSteamWorks && !bSteamTools) {
 			bSecure = true;
 		}
 		
@@ -761,17 +768,21 @@ stock int GetPing(int iClient)
 	return RoundFloat(fPing);
 }
 
-stock TFClassType TF2_GetPlayerClass(int iClient) 
+stock bool TF2_IsValidClass(int iClass) {
+	return iClass < 10 && iClass > 0;
+}
+
+stock int TF2_GetPlayerClass(int iClient)
 {
-	if(!IsValidClient(iClient, false)) {
-		return view_as<TFClassType>(-1);
+	if (!IsValidClient(iClient, false)) {
+		return -1;
 	}
 	
-	if(!HasEntProp(iClient, Prop_Send, "m_iClass")) {
-		return view_as<TFClassType>(-1);
+	if (!HasEntProp(iClient, Prop_Send, "m_iClass")) {
+		return -1;
 	}
 	
-	return view_as<TFClassType>(GetEntProp(iClient, Prop_Send, "m_iClass"));
+	return GetEntProp(iClient, Prop_Send, "m_iClass");
 }
 
 // Thanks Necavi - https://forums.alliedmods.net/showthread.php?p=1796351

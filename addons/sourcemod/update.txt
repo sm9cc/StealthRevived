@@ -4,13 +4,13 @@
 	{
 		"Version"
 		{
-			"Latest"	"0.6"
-			"Previous"	"0.5"
+			"Latest"	"0.7"
+			"Previous"	"0.6"
 		}
 		
-		"Notes"	"Fix more error spam scenarios (Thanks rengo)"
-		"Notes"	"Correct TF2 disconnect reason."
-		"Notes"	"Misc code changes."
+		"Notes"	"Fixed issue with fake disconnect event breaking hud / radar."
+		"Notes"	"Improved logic inside fake event creation."
+		"Notes"	"General fixes."
 	}
 	
 	"Files"

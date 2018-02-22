@@ -25,6 +25,10 @@
 				- Fix more error spam scenarios (Thanks rengo)
 				- Correct TF2 disconnect reason.
 				- Misc code changes.
+			0.7 - 
+				- Fixed issue with fake disconnect event breaking hud / radar.
+				- Improved logic inside fake event creation.
+				- General fixes.
 				
 *****************************************************************************************************
 *****************************************************************************************************
@@ -50,7 +54,7 @@
 /****************************************************************************************************
 	DEFINES
 *****************************************************************************************************/
-#define PL_VERSION "0.6"
+#define PL_VERSION "0.7"
 #define LoopValidPlayers(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1))
 #define LoopValidClients(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1, false))
 
@@ -86,7 +90,8 @@ ConVar g_cCmdInterval = null;
 /****************************************************************************************************
 	BOOLS.
 *****************************************************************************************************/
-bool g_bStealthed[MAXPLAYERS + 1] = false;
+bool g_bStealthed[MAXPLAYERS + 1];
+bool g_bDCFaked[MAXPLAYERS + 1];
 bool g_bWindows = false;
 bool g_bRewriteStatus = false;
 bool g_bFakeDC = false;
@@ -96,7 +101,7 @@ bool g_bDataCached = false;
 /****************************************************************************************************
 	INTS.
 *****************************************************************************************************/
-int g_iLastCommand[MAXPLAYERS + 1] = -1;
+int g_iLastCommand[MAXPLAYERS + 1];
 int g_iCmdInterval = 1;
 int g_iTickRate = 0;
 int g_iServerPort = 0;
@@ -196,7 +201,7 @@ public void OnLibraryRemoved(const char[] szName)
 	}
 }
 
-public APLRes AskPluginLoad2(Handle hNyself, bool bLate, char[] chError, int iErrMax)
+public APLRes AskPluginLoad2(Handle hMyself, bool bLate, char[] szError, int iErrMax)
 {
 	RegPluginLibrary("StealthRevived");
 	CreateNative("SR_IsClientStealthed", Native_IsClientStealthed);
@@ -243,7 +248,7 @@ public void OnMapStart()
 	SDKHook(g_iPlayerManager, SDKHook_ThinkPost, Hook_PlayerManagerThinkPost);
 }
 
-public Action Command_Status(int iClient, const char[] szComman, int iArgs)
+public Action Command_Status(int iClient, const char[] szCommand, int iArgs)
 {
 	if (iClient < 1) {
 		return Plugin_Continue;
@@ -266,7 +271,7 @@ public Action Command_Status(int iClient, const char[] szComman, int iArgs)
 	return Plugin_Handled;
 }
 
-public Action ExecuteStringCommand(int iClient, char sMessage[1024])
+public Action ExecuteStringCommand(int iClient, char szMessage[1024])
 {
 	if (g_iLastCommand[iClient] > -1 && GetTime() - g_iLastCommand[iClient] < g_iCmdInterval) {
 		return Plugin_Handled;
@@ -276,12 +281,12 @@ public Action ExecuteStringCommand(int iClient, char sMessage[1024])
 		return Plugin_Continue;
 	}
 	
-	static char sMessage2[1024];
-	sMessage2 = sMessage;
+	static char szMessage2[1024];
+	szMessage2 = szMessage;
 	
-	TrimString(sMessage2);
+	TrimString(szMessage2);
 	
-	if (StrContains(sMessage2, "status") == -1) {
+	if (StrContains(szMessage2, "status") == -1) {
 		return Plugin_Continue;
 	}
 	
@@ -300,52 +305,88 @@ public Action Event_PlayerTeam(Event evEvent, char[] szEvent, bool bDontBroadcas
 	int iOldTeam = evEvent.GetInt("oldteam");
 	int iTeam = evEvent.GetInt("team");
 	
-	if (iTeam > 1) {
-		if (g_bStealthed[iClient]) {
-			g_bStealthed[iClient] = false;
+	char szName[MAX_NAME_LENGTH]; GetClientName(iClient, szName, sizeof(szName));
+	char szAuthId[64]; GetClientAuthId(iClient, AuthId_Engine, szAuthId, sizeof(szAuthId));
+	char szIP[64]; GetClientIP(iClient, szIP, sizeof(szIP), false);
+	
+	if (iTeam > 1 && g_bStealthed[iClient]) {
+		g_bStealthed[iClient] = false;
+		
+		if (g_bDCFaked[iClient]) {
+			Event evFakeC = CreateEvent("player_connect", true);
 			
-			Event evFakeTeam = CreateEvent("player_team", true);
-			
-			if (evFakeTeam == null) {
-				return Plugin_Continue;
+			if (evFakeC != null) {
+				evFakeC.SetString("name", szName);
+				evFakeC.SetInt("index", iClient);
+				evFakeC.SetInt("userid", iUserId);
+				evFakeC.SetString("networkid", szAuthId);
+				evFakeC.SetString("address", szIP);
+				evFakeC.SetInt("bot", false);
+				
+				LoopValidPlayers(i) {
+					if (i == iClient) {
+						continue;
+					}
+					
+					evFakeC.FireToClient(i);
+				}
+				
+				evFakeC.Cancel();
+				g_bDCFaked[iClient] = false;
 			}
-			
+		}
+		
+		Event evFakeTeam = CreateEvent("player_team", true);
+		
+		if (evFakeTeam != null) {
+			evEvent.BroadcastDisabled = true;
 			evFakeTeam.SetInt("userid", iUserId);
 			evFakeTeam.SetInt("team", iTeam);
 			evFakeTeam.SetInt("oldteam", iOldTeam);
 			evFakeTeam.SetInt("disconnect", false);
 			evFakeTeam.FireToClient(iClient);
 			evFakeTeam.Cancel();
-			
-			return Plugin_Handled;
 		}
 		
+		return Plugin_Handled;
+	}
+	
+	if (!IsClientStealthWorthy(iClient) || g_bStealthed[iClient]) {
 		return Plugin_Continue;
 	}
 	
-	if (!IsClientStealthWorthy(iClient)) {
-		return Plugin_Continue;
-	}
-	
-	if (iOldTeam > 1 && g_bFakeDC) {
-		Event evFakeDC = CreateEvent("player_disconnect", true);
+	if (iTeam < 2) {
+		evEvent.BroadcastDisabled = true;
 		
-		if (evFakeDC != null) {
-			char szName[MAX_NAME_LENGTH]; GetClientName(iClient, szName, MAX_NAME_LENGTH);
-			char szAuthId[64]; GetClientAuthId(iClient, AuthId_Steam2, szAuthId, 64);
+		if (g_bFakeDC) {
+			Event evFakeDC = CreateEvent("player_disconnect", true);
 			
-			evFakeDC.SetInt("userid", iUserId);
-			evFakeDC.SetString("reason", StrEqual(g_szGameName, "csgo", false) ? "Disconnect" : "Disconnect by user.");
-			evFakeDC.SetString("name", szName);
-			evFakeDC.SetString("networkid", szAuthId);
-			evFakeDC.SetInt("bot", false);
-			evFakeDC.Fire();
+			if (evFakeDC != null) {
+				evFakeDC.SetInt("userid", iUserId);
+				evFakeDC.SetString("reason", StrEqual(g_szGameName, "csgo", false) ? "Disconnect" : "Disconnect by user.");
+				evFakeDC.SetString("name", szName);
+				evFakeDC.SetString("networkid", szAuthId);
+				evFakeDC.SetInt("bot", false);
+				
+				LoopValidPlayers(i) {
+					if (i == iClient) {
+						continue;
+					}
+					
+					evFakeDC.FireToClient(i);
+				}
+				
+				evFakeDC.Cancel();
+				g_bDCFaked[iClient] = true;
+			}
 		}
+		
+		g_bStealthed[iClient] = true;
+		
+		return Plugin_Handled;
 	}
 	
-	g_bStealthed[iClient] = true;
-	
-	return Plugin_Handled;
+	return Plugin_Continue;
 }
 
 public Action TF2Events_CallBack(Event evEvent, char[] szEvent, bool bDontBroadcast)
@@ -410,21 +451,24 @@ public void OnClientPutInServer(int iClient)
 	
 	g_iLastCommand[iClient] = -1;
 	g_bStealthed[iClient] = false;
+	g_bDCFaked[iClient] = false;
 }
 
 public void OnClientDisconnect(int iClient)
 {
 	g_iLastCommand[iClient] = -1;
 	g_bStealthed[iClient] = false;
+	g_bDCFaked[iClient] = false;
 }
 
 public void OnEntityCreated(int iEntity, const char[] szClassName)
 {
-	if (StrEqual(szClassName, "cs_player_manager", false) || StrEqual(szClassName, "tf_player_manager", false)) {
-		g_iPlayerManager = iEntity;
-		
-		SDKHook(g_iPlayerManager, SDKHook_ThinkPost, Hook_PlayerManagerThinkPost);
+	if (StrContains(szClassName, "player_manager", false) == -1) {
+		return;
 	}
+	
+	g_iPlayerManager = iEntity;
+	SDKHook(g_iPlayerManager, SDKHook_ThinkPost, Hook_PlayerManagerThinkPost);
 }
 
 public void Hook_PlayerManagerThinkPost(int iEntity)
@@ -642,7 +686,7 @@ public void CacheInformation(any anything)
 		
 		char szSplit[2][64];
 		
-		if (ExplodeString(szBuffer, "/", szSplit, 2, 64) < 1) {
+		if (ExplodeString(szBuffer, "/", szSplit, 2, sizeof(szSplit)) < 1) {
 			return;
 		}
 		

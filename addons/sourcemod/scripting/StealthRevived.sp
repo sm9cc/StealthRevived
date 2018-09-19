@@ -29,6 +29,11 @@
 				- Fixed issue with fake disconnect event breaking hud / radar.
 				- Improved logic inside fake event creation.
 				- General fixes.
+			0.8 - 
+				- Fixed issue where team broadcast being disabled caused the team menu to get stuck.
+				- Fixed bad logic in SendProxy Callback.
+				- Fixed "unconnected" bug on team changes.
+				- Added check to make sure team event exists.
 				
 *****************************************************************************************************
 *****************************************************************************************************
@@ -54,7 +59,7 @@
 /****************************************************************************************************
 	DEFINES
 *****************************************************************************************************/
-#define PL_VERSION "0.7"
+#define PL_VERSION "0.8"
 #define LoopValidPlayers(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1))
 #define LoopValidClients(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1, false))
 
@@ -91,7 +96,7 @@ ConVar g_cCmdInterval = null;
 	BOOLS.
 *****************************************************************************************************/
 bool g_bStealthed[MAXPLAYERS + 1];
-bool g_bDCFaked[MAXPLAYERS + 1];
+bool g_bDisconnectFaked[MAXPLAYERS + 1];
 bool g_bWindows = false;
 bool g_bRewriteStatus = false;
 bool g_bFakeDC = false;
@@ -176,7 +181,10 @@ public void OnPluginStart()
 	
 	GetGameFolderName(g_szGameName, sizeof(g_szGameName));
 	
-	HookEvent("player_team", Event_PlayerTeam, EventHookMode_Pre);
+	if (!HookEventEx("player_team", Event_PlayerTeam_Pre, EventHookMode_Pre)) {
+		SetFailState("player_team event does not exist on this mod, plugin disabled");
+		return;
+	}
 	
 	if (StrEqual(g_szGameName, "tf", false)) {
 		HookEventEx("player_spawn", TF2Events_CallBack);
@@ -293,100 +301,133 @@ public Action ExecuteStringCommand(int iClient, char szMessage[1024])
 	return PrintCustomStatus(iClient) ? Plugin_Handled : Plugin_Continue;
 }
 
-public Action Event_PlayerTeam(Event evEvent, char[] szEvent, bool bDontBroadcast)
+public Action Event_PlayerTeam_Pre(Event evGlobal, char[] szEvent, bool bDontBroadcast)
 {
-	int iUserId = evEvent.GetInt("userid");
+	int iUserId = evGlobal.GetInt("userid");
 	int iClient = GetClientOfUserId(iUserId);
 	
-	if (iClient <= 0 || iClient > MaxClients || view_as<bool>(evEvent.GetInt("disconnect"))) {
+	if (iClient <= 0 || iClient > MaxClients || !IsClientInGame(iClient) || view_as<bool>(evGlobal.GetInt("disconnect")) || IsFakeClient(iClient)) {
 		return Plugin_Continue;
 	}
 	
-	int iOldTeam = evEvent.GetInt("oldteam");
-	int iTeam = evEvent.GetInt("team");
+	int iTeam = evGlobal.GetInt("team");
 	
-	char szName[MAX_NAME_LENGTH]; GetClientName(iClient, szName, sizeof(szName));
-	char szAuthId[64]; GetClientAuthId(iClient, AuthId_Engine, szAuthId, sizeof(szAuthId));
-	char szIP[64]; GetClientIP(iClient, szIP, sizeof(szIP), false);
+	if (iTeam == GetClientTeam(iClient)) {
+		return Plugin_Continue;
+	}
 	
-	if (iTeam > 1 && g_bStealthed[iClient]) {
+	int iOldTeam = evGlobal.GetInt("oldteam");
+	
+	Event evNewTeam = CreateEvent("player_team", true);
+	
+	if (evNewTeam == null) {
+		SetFailState("Failed to create player_team event");
+		return Plugin_Continue;
+	}
+	
+	evNewTeam.SetInt("userid", iUserId);
+	evNewTeam.SetInt("team", iTeam);
+	evNewTeam.SetInt("oldteam", iOldTeam);
+	evNewTeam.SetInt("disconnect", false);
+	
+	evGlobal.BroadcastDisabled = true;
+	
+	if(iTeam > 1) {
 		g_bStealthed[iClient] = false;
-		
-		if (g_bDCFaked[iClient]) {
-			Event evFakeC = CreateEvent("player_connect", true);
-			
-			if (evFakeC != null) {
-				evFakeC.SetString("name", szName);
-				evFakeC.SetInt("index", iClient);
-				evFakeC.SetInt("userid", iUserId);
-				evFakeC.SetString("networkid", szAuthId);
-				evFakeC.SetString("address", szIP);
-				evFakeC.SetInt("bot", false);
-				
-				LoopValidPlayers(i) {
-					if (i == iClient) {
-						continue;
-					}
-					
-					evFakeC.FireToClient(i);
-				}
-				
-				evFakeC.Cancel();
-				g_bDCFaked[iClient] = false;
-			}
-		}
-		
-		Event evFakeTeam = CreateEvent("player_team", true);
-		
-		if (evFakeTeam != null) {
-			evEvent.BroadcastDisabled = true;
-			evFakeTeam.SetInt("userid", iUserId);
-			evFakeTeam.SetInt("team", iTeam);
-			evFakeTeam.SetInt("oldteam", iOldTeam);
-			evFakeTeam.SetInt("disconnect", false);
-			evFakeTeam.FireToClient(iClient);
-			evFakeTeam.Cancel();
-		}
-		
-		return Plugin_Handled;
+	} else {
+		evNewTeam.FireToClient(iClient);
 	}
 	
-	if (!IsClientStealthWorthy(iClient) || g_bStealthed[iClient]) {
-		return Plugin_Continue;
-	}
-	
-	if (iTeam < 2) {
-		evEvent.BroadcastDisabled = true;
-		
-		if (g_bFakeDC) {
-			Event evFakeDC = CreateEvent("player_disconnect", true);
-			
-			if (evFakeDC != null) {
-				evFakeDC.SetInt("userid", iUserId);
-				evFakeDC.SetString("reason", StrEqual(g_szGameName, "csgo", false) ? "Disconnect" : "Disconnect by user.");
-				evFakeDC.SetString("name", szName);
-				evFakeDC.SetString("networkid", szAuthId);
-				evFakeDC.SetInt("bot", false);
-				
-				LoopValidPlayers(i) {
-					if (i == iClient) {
-						continue;
-					}
-					
-					evFakeDC.FireToClient(i);
-				}
-				
-				evFakeDC.Cancel();
-				g_bDCFaked[iClient] = true;
-			}
-		}
-		
-		g_bStealthed[iClient] = true;
-		
-		return Plugin_Handled;
-	}
+	CreateTimer(0.01, Timer_DelayedTeam, evNewTeam);
 	
 	return Plugin_Continue;
+}
+
+public Action Timer_DelayedTeam(Handle hTimer, Event evNewTeam)
+{
+	int iUserId = evNewTeam.GetInt("userid");
+	int iClient = GetClientOfUserId(iUserId);
+	
+	if (!IsValidClient(iClient)) {
+		evNewTeam.Cancel();
+		evNewTeam = null;
+		return Plugin_Stop;
+	}
+	
+	int iTeam = evNewTeam.GetInt("team");
+	
+	if (iTeam > 1) {
+		if (g_bDisconnectFaked[iClient]) {
+			Event evFakeConnect = CreateEvent("player_connect", true);
+			
+			if (evFakeConnect != null) {
+				char szName[MAX_NAME_LENGTH]; GetClientName(iClient, szName, sizeof(szName));
+				char szAuthId[64]; GetClientAuthId(iClient, AuthId_Engine, szAuthId, sizeof(szAuthId));
+				char szIP[64]; GetClientIP(iClient, szIP, sizeof(szIP), false);
+				
+				evFakeConnect.SetString("name", szName);
+				evFakeConnect.SetInt("index", iClient);
+				evFakeConnect.SetInt("userid", iUserId);
+				evFakeConnect.SetString("networkid", szAuthId);
+				evFakeConnect.SetString("address", szIP);
+				evFakeConnect.SetInt("bot", false);
+				
+				LoopValidPlayers(i) {
+					if (i == iClient) {
+						continue;
+					}
+					
+					evFakeConnect.FireToClient(i);
+				}
+				
+				evFakeConnect.Cancel();
+			}
+		}
+		
+		g_bDisconnectFaked[iClient] = false;
+		evNewTeam.Fire();
+		evNewTeam = null;
+	} else {
+		evNewTeam.Cancel();
+		evNewTeam = null;
+		
+		if (!g_bStealthed[iClient] && IsClientStealthWorthy(iClient)) {
+			if (g_bFakeDC) {
+				Event evFakeDisconnect = CreateEvent("player_disconnect", true);
+				
+				if (evFakeDisconnect != null) {
+					char szName[MAX_NAME_LENGTH]; GetClientName(iClient, szName, sizeof(szName));
+					char szAuthId[64]; GetClientAuthId(iClient, AuthId_Engine, szAuthId, sizeof(szAuthId));
+					char szIP[64]; GetClientIP(iClient, szIP, sizeof(szIP), false);
+					
+					evFakeDisconnect.SetInt("userid", iUserId);
+					evFakeDisconnect.SetString("reason", StrEqual(g_szGameName, "csgo", false) ? "Disconnect" : "Disconnect by user.");
+					evFakeDisconnect.SetString("name", szName);
+					evFakeDisconnect.SetString("networkid", szAuthId);
+					evFakeDisconnect.SetInt("bot", false);
+					
+					LoopValidPlayers(i) {
+						if (i == iClient) {
+							continue;
+						}
+						
+						evFakeDisconnect.FireToClient(i);
+					}
+					
+					evFakeDisconnect.Cancel();
+					g_bDisconnectFaked[iClient] = true;
+				}
+			}
+			
+			g_bStealthed[iClient] = true;
+		}
+	}
+	
+	if(evNewTeam != null) {
+		evNewTeam.Cancel();
+	}
+	
+	return Plugin_Stop;
 }
 
 public Action TF2Events_CallBack(Event evEvent, char[] szEvent, bool bDontBroadcast)
@@ -445,20 +486,20 @@ public void OnClientPutInServer(int iClient)
 	
 	#if defined _SENDPROXYMANAGER_INC_
 	if (g_bSendProxy) {
-		SendProxy_Hook(iClient, "m_hObserverTarget", Prop_Int, PropHook_CallBack);
+		SendProxy_Hook(iClient, "m_hObserverTarget", Prop_Int, SendProxy_CallBack);
 	}
 	#endif
 	
 	g_iLastCommand[iClient] = -1;
 	g_bStealthed[iClient] = false;
-	g_bDCFaked[iClient] = false;
+	g_bDisconnectFaked[iClient] = false;
 }
 
 public void OnClientDisconnect(int iClient)
 {
 	g_iLastCommand[iClient] = -1;
 	g_bStealthed[iClient] = false;
-	g_bDCFaked[iClient] = false;
+	g_bDisconnectFaked[iClient] = false;
 }
 
 public void OnEntityCreated(int iEntity, const char[] szClassName)
@@ -478,26 +519,20 @@ public void Hook_PlayerManagerThinkPost(int iEntity)
 	}
 }
 
-#if defined _SENDPROXYMANAGER_INC_
-public Action PropHook_CallBack(int iEntity, const char[] szPropName, int &iValue, int iElement)
+public Action SendProxy_CallBack(int iClient, const char[] szPropName, int & iFakeValue, int iClient2)
 {
-	if (iEntity != iValue) {
+	if (!g_bStealthed[iClient]) {
 		return Plugin_Continue;
 	}
 	
-	iValue = g_bStealthed[iEntity] ? -1 : iValue;
+	iFakeValue = -1;
 	
 	return Plugin_Changed;
 }
-#endif
 
 public Action Hook_SetTransmit(int iEntity, int iClient)
 {
-	if (iEntity == iClient) {
-		return Plugin_Continue;
-	}
-	
-	if (!IsValidClient(iEntity)) {
+	if (iEntity == iClient || iEntity < 1 || iEntity > MaxClients) {
 		return Plugin_Continue;
 	}
 	
@@ -736,7 +771,7 @@ public void CacheInformation(any anything)
 
 stock bool IsValidClient(int iClient, bool bIgnoreBots = true)
 {
-	if (iClient <= 0 || iClient > MaxClients) {
+	if (iClient < 1 || iClient > MaxClients) {
 		return false;
 	}
 	

@@ -4,13 +4,14 @@
 	{
 		"Version"
 		{
-			"Latest"	"0.7"
-			"Previous"	"0.6"
+			"Latest"	"0.8"
+			"Previous"	"0.7"
 		}
 		
-		"Notes"	"Fixed issue with fake disconnect event breaking hud / radar."
-		"Notes"	"Improved logic inside fake event creation."
-		"Notes"	"General fixes."
+		"Notes"	"Fixed issue where team broadcast being disabled caused the team menu to get stuck."
+		"Notes"	"Fixed bad logic in SendProxy Callback."
+		"Notes"	"Fixed unconnected bug on team changes."
+		"Notes"	"Added check to make sure team event exists."
 	}
 	
 	"Files"

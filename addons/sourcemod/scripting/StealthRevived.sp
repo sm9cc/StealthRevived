@@ -34,6 +34,9 @@
 				- Fixed bad logic in SendProxy Callback.
 				- Fixed "unconnected" bug on team changes.
 				- Added check to make sure team event exists.
+			0.9 - 
+				- Removed SendProxy (It's too problematic)
+				- Added a ConVar 'sm_stealth_cheat_hide' for cheat blocking (SetTransmit is inherently expensive thus this option can cause performance issues on some setups)
 				
 *****************************************************************************************************
 *****************************************************************************************************
@@ -59,7 +62,7 @@
 /****************************************************************************************************
 	DEFINES
 *****************************************************************************************************/
-#define PL_VERSION "0.8"
+#define PL_VERSION "0.9"
 #define LoopValidPlayers(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1))
 #define LoopValidClients(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1, false))
 
@@ -84,13 +87,14 @@ public Plugin myinfo =
 /****************************************************************************************************
 	HANDLES.
 *****************************************************************************************************/
-ConVar g_cHostName = null;
-ConVar g_cHostPort = null;
-ConVar g_cHostIP = null;
-ConVar g_cTags = null;
-ConVar g_cCustomStatus = null;
-ConVar g_cFakeDisconnect = null;
-ConVar g_cCmdInterval = null;
+ConVar g_cvHostName = null;
+ConVar g_cvHostPort = null;
+ConVar g_cvHostIP = null;
+ConVar g_cvTags = null;
+ConVar g_cvCustomStatus = null;
+ConVar g_cvFakeDisconnect = null;
+ConVar g_cvCmdInterval = null;
+ConVar g_cvSetTransmit = null;
 
 /****************************************************************************************************
 	BOOLS.
@@ -100,8 +104,8 @@ bool g_bDisconnectFaked[MAXPLAYERS + 1];
 bool g_bWindows = false;
 bool g_bRewriteStatus = false;
 bool g_bFakeDC = false;
-bool g_bSendProxy = false;
 bool g_bDataCached = false;
+bool g_bSetTransmit = true;
 
 /****************************************************************************************************
 	INTS.
@@ -130,24 +134,27 @@ public void OnPluginStart()
 {
 	AutoExecConfig_SetFile("plugin.stealthrevived");
 	
-	g_cCustomStatus = AutoExecConfig_CreateConVar("sm_stealth_customstatus", "1", "Should the plugin rewrite status out? 0 = False, 1 = True", _, true, 0.0, true, 1.0);
-	g_cCustomStatus.AddChangeHook(OnCvarChanged);
+	g_cvCustomStatus = AutoExecConfig_CreateConVar("sm_stealth_customstatus", "1", "Should the plugin rewrite status out? 0 = False, 1 = True", _, true, 0.0, true, 1.0);
+	g_cvCustomStatus.AddChangeHook(OnCvarChanged);
 	
-	g_cFakeDisconnect = AutoExecConfig_CreateConVar("sm_stealth_fakedc", "1", "Should the plugin fire a fake disconnect when somebody goes stealth? 0 = False, 1 = True", _, true, 0.0, true, 1.0);
-	g_cFakeDisconnect.AddChangeHook(OnCvarChanged);
+	g_cvFakeDisconnect = AutoExecConfig_CreateConVar("sm_stealth_fakedc", "1", "Should the plugin fire a fake disconnect when somebody goes stealth? 0 = False, 1 = True", _, true, 0.0, true, 1.0);
+	g_cvFakeDisconnect.AddChangeHook(OnCvarChanged);
 	
-	g_cCmdInterval = AutoExecConfig_CreateConVar("sm_stealth_cmd_interval", "1", "How often can the status cmd be used in seconds?", _, true, 0.0);
-	g_cCmdInterval.AddChangeHook(OnCvarChanged);
+	g_cvCmdInterval = AutoExecConfig_CreateConVar("sm_stealth_cmd_interval", "1", "How often can the status cmd be used in seconds?", _, true, 0.0);
+	g_cvCmdInterval.AddChangeHook(OnCvarChanged);
+	
+	g_cvSetTransmit = AutoExecConfig_CreateConVar("sm_stealth_cheat_hide", "1", "Should the plugin prevent cheats with 'spectator list'? (This option may cause performance issues on some servers)", _, true, 0.0, true, 1.0);
+	g_cvSetTransmit.AddChangeHook(OnCvarChanged);
 	
 	AutoExecConfig_CleanFile(); AutoExecConfig_ExecuteFile();
 	
-	g_cHostName = FindConVar("hostname");
-	g_cHostPort = FindConVar("hostport");
-	g_cHostIP = FindConVar("hostip");
-	g_cTags = FindConVar("sv_tags");
+	g_cvHostName = FindConVar("hostname");
+	g_cvHostPort = FindConVar("hostport");
+	g_cvHostIP = FindConVar("hostip");
+	g_cvTags = FindConVar("sv_tags");
 	
-	if (g_cTags != null) {
-		g_cTags.AddChangeHook(OnCvarChanged);
+	if (g_cvTags != null) {
+		g_cvTags.AddChangeHook(OnCvarChanged);
 	}
 	
 	#if defined _updater_included
@@ -162,22 +169,7 @@ public void OnPluginStart()
 	}
 	#endif
 	
-	g_bSendProxy = LibraryExists("sendproxy");
-	
 	AddCommandListener(Command_Status, "status");
-	OnConfigsExecuted();
-	
-	LoopValidPlayers(iClient) {
-		OnClientPutInServer(iClient);
-		
-		if (!IsClientStealthWorthy(iClient)) {
-			continue;
-		}
-		
-		if (GetClientTeam(iClient) < 2) {
-			g_bStealthed[iClient] = true;
-		}
-	}
 	
 	GetGameFolderName(g_szGameName, sizeof(g_szGameName));
 	
@@ -197,15 +189,6 @@ public void OnLibraryAdded(const char[] szName)
 {
 	if (StrEqual(szName, "updater", false)) {
 		Updater_AddPlugin(UPDATE_URL);
-	} else if (StrEqual(szName, "sendproxy", false)) {
-		g_bSendProxy = true;
-	}
-}
-
-public void OnLibraryRemoved(const char[] szName)
-{
-	if (StrEqual(szName, "sendproxy", false)) {
-		g_bSendProxy = false;
 	}
 }
 
@@ -218,23 +201,46 @@ public APLRes AskPluginLoad2(Handle hMyself, bool bLate, char[] szError, int iEr
 
 public void OnCvarChanged(ConVar cConVar, const char[] szOldValue, const char[] szNewValue)
 {
-	if (cConVar == g_cCustomStatus) {
+	if (cConVar == g_cvCustomStatus) {
 		g_bRewriteStatus = view_as<bool>(StringToInt(szNewValue));
-	} else if (cConVar == g_cFakeDisconnect) {
+	} else if (cConVar == g_cvFakeDisconnect) {
 		g_bFakeDC = view_as<bool>(StringToInt(szNewValue));
-	} else if (cConVar == g_cCmdInterval) {
+	} else if (cConVar == g_cvCmdInterval) {
 		g_iCmdInterval = StringToInt(szNewValue);
-	} else if (cConVar == g_cTags) {
+	} else if (cConVar == g_cvTags) {
 		strcopy(g_szTags, 512, szNewValue);
+	} else if (cConVar == g_cvSetTransmit) {
+		g_bSetTransmit = view_as<bool>(StringToInt(szNewValue));
+		
+		LoopValidPlayers(iClient) {
+			if (g_bSetTransmit) {
+				SDKHook(iClient, SDKHook_SetTransmit, Hook_SetTransmit);
+			} else {
+				SDKUnhook(iClient, SDKHook_SetTransmit, Hook_SetTransmit);
+			}
+		}
 	}
 }
 
 public void OnConfigsExecuted()
 {
-	g_bRewriteStatus = g_cCustomStatus.BoolValue;
-	g_bFakeDC = g_cFakeDisconnect.BoolValue;
-	g_iCmdInterval = g_cCmdInterval.IntValue;
-	g_cTags.GetString(g_szTags, 512);
+	g_bRewriteStatus = g_cvCustomStatus.BoolValue;
+	g_bFakeDC = g_cvFakeDisconnect.BoolValue;
+	g_iCmdInterval = g_cvCmdInterval.IntValue;
+	g_cvTags.GetString(g_szTags, 512);
+	g_bSetTransmit = g_cvSetTransmit.BoolValue;
+	
+	LoopValidPlayers(iClient) {
+		OnClientPutInServer(iClient);
+		
+		if (!IsClientStealthWorthy(iClient)) {
+			continue;
+		}
+		
+		if (GetClientTeam(iClient) < 2) {
+			g_bStealthed[iClient] = true;
+		}
+	}
 }
 
 public void OnMapStart()
@@ -332,7 +338,7 @@ public Action Event_PlayerTeam_Pre(Event evGlobal, char[] szEvent, bool bDontBro
 	
 	evGlobal.BroadcastDisabled = true;
 	
-	if(iTeam > 1) {
+	if (iTeam > 1) {
 		g_bStealthed[iClient] = false;
 	} else {
 		evNewTeam.FireToClient(iClient);
@@ -423,7 +429,7 @@ public Action Timer_DelayedTeam(Handle hTimer, Event evNewTeam)
 		}
 	}
 	
-	if(evNewTeam != null) {
+	if (evNewTeam != null) {
 		evNewTeam.Cancel();
 	}
 	
@@ -482,13 +488,9 @@ public Action TF2Events_CallBack(Event evEvent, char[] szEvent, bool bDontBroadc
 
 public void OnClientPutInServer(int iClient)
 {
-	SDKHook(iClient, SDKHook_SetTransmit, Hook_SetTransmit);
-	
-	#if defined _SENDPROXYMANAGER_INC_
-	if (g_bSendProxy) {
-		SendProxy_Hook(iClient, "m_hObserverTarget", Prop_Int, SendProxy_CallBack);
+	if (g_bSetTransmit) {
+		SDKHook(iClient, SDKHook_SetTransmit, Hook_SetTransmit);
 	}
-	#endif
 	
 	g_iLastCommand[iClient] = -1;
 	g_bStealthed[iClient] = false;
@@ -519,20 +521,15 @@ public void Hook_PlayerManagerThinkPost(int iEntity)
 	}
 }
 
-public Action SendProxy_CallBack(int iClient, const char[] szPropName, int & iFakeValue, int iClient2)
-{
-	if (!g_bStealthed[iClient]) {
-		return Plugin_Continue;
-	}
-	
-	iFakeValue = -1;
-	
-	return Plugin_Changed;
-}
-
 public Action Hook_SetTransmit(int iEntity, int iClient)
 {
 	if (iEntity == iClient || iEntity < 1 || iEntity > MaxClients) {
+		return Plugin_Continue;
+	}
+	
+	if(!g_bSetTransmit) {
+		SDKUnhook(iEntity, SDKHook_SetTransmit, Hook_SetTransmit);
+		SDKUnhook(iClient, SDKHook_SetTransmit, Hook_SetTransmit);
 		return Plugin_Continue;
 	}
 	
@@ -664,8 +661,8 @@ public void CacheInformation(any anything)
 	g_iTickRate = RoundToZero(1.0 / GetTickInterval());
 	
 	g_bWindows = StrContains(szStatus, "os      :  Windows", true) != -1;
-	g_cHostName.GetString(g_szHostName, sizeof(g_szHostName));
-	g_iServerPort = g_cHostPort.IntValue;
+	g_cvHostName.GetString(g_szHostName, sizeof(g_szHostName));
+	g_iServerPort = g_cvHostPort.IntValue;
 	
 	#if defined _SteamWorks_Included || defined _steamtools_included
 	bSteamWorks = LibraryExists("SteamWorks");
@@ -687,7 +684,7 @@ public void CacheInformation(any anything)
 	#endif
 	
 	if (!bSteamWorks && !bSteamTools) {
-		int iServerIP = g_cHostIP.IntValue;
+		int iServerIP = g_cvHostIP.IntValue;
 		Format(g_szServerIP, sizeof(g_szServerIP), "%d.%d.%d.%d", iServerIP >>> 24 & 255, iServerIP >>> 16 & 255, iServerIP >>> 8 & 255, iServerIP & 255);
 	}
 	

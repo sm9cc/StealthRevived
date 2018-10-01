@@ -4,14 +4,12 @@
 	{
 		"Version"
 		{
-			"Latest"	"0.8"
-			"Previous"	"0.7"
+			"Latest"	"0.9"
+			"Previous"	"0.8"
 		}
 		
-		"Notes"	"Fixed issue where team broadcast being disabled caused the team menu to get stuck."
-		"Notes"	"Fixed bad logic in SendProxy Callback."
-		"Notes"	"Fixed unconnected bug on team changes."
-		"Notes"	"Added check to make sure team event exists."
+		"Notes"	"Removed SendProxy (It's too problematic)"
+		"Notes"	"Added a ConVar 'sm_stealth_cheat_hide' for cheat blocking (SetTransmit is inherently expensive thus this option can cause performance issues on some setups)"
 	}
 	
 	"Files"

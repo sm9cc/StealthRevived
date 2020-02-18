@@ -1,7 +1,6 @@
 # Simple Stealth #
 
-*Just another Stealth plugin.
-*
+*Just another Stealth plugin.*
 
 Simple Stealth is a plugin which aims to help server admins catch cheaters by hiding them when they go into spectator.
 

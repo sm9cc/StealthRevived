@@ -1,9 +1,9 @@
-# Stealth Revived #
+# Simple Stealth #
 
-*A proper stealth plugin that actually works.
+*Just another Stealth plugin.
 *
 
-Stealth Revived is a plugin which aims to help server admins catch cheaters by hiding them completely when they go into spectator.
+Simple Stealth is a plugin which aims to help server admins catch cheaters by hiding them when they go into spectator.
 
 ### What does the plugin currently do? ###
 * Hides stealthed admins from scoreboard.
@@ -11,7 +11,7 @@ Stealth Revived is a plugin which aims to help server admins catch cheaters by h
 * Blocks cheats with "Show spectator option"
 
 ### How does it work? ###
-* Simple join spectator while you have Admin Kick flag (Or you can change it using the override 'admin_stealth') and you will vanish, Now you can easily spectate cheaters and they will never know!
+* Simply join spectator while you have Admin Kick flag (Or you can change it using the override 'admin_stealth') and you will vanish, Now you can easily spectate cheaters and they will never know!
 
 ### Does it support games other than CSGO / TF2? ###
 It does partially, but the status rewrite for games other than TF2 and CSGO is not yet supported.

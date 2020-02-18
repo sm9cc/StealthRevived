@@ -36,18 +36,18 @@
 				- Added check to make sure team event exists.
 			0.9 - 
 				- Removed SendProxy (It's too problematic)
-				- Added a ConVar 'sm_stealth_cheat_hide' for cheat blocking (SetTransmit is inherently expensive thus this option can cause performance issues on some setups)
+				- Added a ConVar 'sm_simplestealth_hidecheats' for cheat blocking (SetTransmit is inherently expensive thus this option can cause performance issues on some setups)
 			0.9.1 - 
 				- Support PtaH 1.1.0 (fix by FIVE)
 			1.0.0 -
 				- Renamed plugin to 'SimpleStealth'
 				- Removed Fake Disconnect / Connect (Now it wont show any messages)
-					- I plan to attempt to fix this later but it has been very problematic, causing issues with radar, event messages showing 'Unconnected' etc.
+					- I will attempt to fix this later but it has been very problematic, causing issues with radar, event messages showing 'Unconnected' etc.
 				- Remove SteamTools support - Use SteamWorks already!
 				- Remove Updater support.
 				- Fixed PTaH hook.
 				- Fixed 'version' in status.
-				- Improved SetTransmit performance when using 'sm_stealth_cheat_hide' by only hooking stealthed clients.
+				- Improved SetTransmit performance when using 'sm_simplestealth_hidecheats' by only hooking stealthed clients.
 				- Removed 'status' cmd interval ConVar to keep things simple.
 				- General fixes.
 				

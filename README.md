@@ -1,7 +1,7 @@
-## Simple Stealth ##
+## Stealth Revived ##
 
 ### What is this? ###
-   Simple Stealth is a plugin which aims to help server admins catch cheaters by hiding them when they go into spectator.
+   Stealth Revived is a plugin which aims to help server admins catch cheaters by hiding them when they go into spectator.
 
 ### What does the plugin currently do? ###
 
@@ -36,8 +36,8 @@ Currently all messages are hidden when you join spectator or a team from being s
 
 ### ConVars ###
 
-    sm_simplestealth_status (Should the plugin rewrite status?) [Default 1]
-    sm_simplestealth_hidecheats (Should the plugin prevent cheats with 'spectator list' working? (This option may cause performance issues on some servers) [Default 1]
+    sm_stealthrevived_status (Should the plugin rewrite status?) [Default 1]
+    sm_stealthrevived_hidecheats (Should the plugin prevent cheats with 'spectator list' working? (This option may cause performance issues on some servers) [Default 1]
 
 
 ### Notes / Known issues ###

@@ -1,7 +1,7 @@
-#if defined _simplestealth_included_
+#if defined _stealthrevived_included_
 #endinput
 #endif
-#define _simplestealth_included_
+#define _stealthrevived_included_
 
 enum {
 	TF_SR_Spawns = 1,
@@ -27,8 +27,8 @@ enum TFClassType
 
 public SharedPlugin __pl_stealthrevived = 
 {
-	name = "SimpleStealth", 
-	file = "SimpleStealth.smx", 
+	name = "StealthRevived", 
+	file = "StealthRevived.smx", 
 	#if defined REQUIRE_PLUGIN
 	required = 1, 
 	#else
@@ -38,7 +38,7 @@ public SharedPlugin __pl_stealthrevived =
 
 #if !defined REQUIRE_PLUGIN
 public void __pl_stealthrevived_SetNTVOptional() {
-	MarkNativeAsOptional("SS_IsClientStealthed");
+	MarkNativeAsOptional("SR_IsClientStealthed");
 }
 #endif
 
@@ -47,4 +47,4 @@ public void __pl_stealthrevived_SetNTVOptional() {
  *
  * @return		True if a client is stealthed. False otherwise.
  */
-native bool SS_IsClientStealthed(int iClient);
+native bool SR_IsClientStealthed(int iClient);

@@ -1,5 +1,5 @@
 /****************************************************************************************************
-	Simple Stealth
+	Stealth Revivived
 *****************************************************************************************************
 
 *****************************************************************************************************
@@ -36,18 +36,17 @@
 				- Added check to make sure team event exists.
 			0.9 - 
 				- Removed SendProxy (It's too problematic)
-				- Added a ConVar 'sm_simplestealth_hidecheats' for cheat blocking (SetTransmit is inherently expensive thus this option can cause performance issues on some setups)
+				- Added a ConVar 'sm_stealthrevived_hidecheats' for cheat blocking (SetTransmit is inherently expensive thus this option can cause performance issues on some setups)
 			0.9.1 - 
 				- Support PtaH 1.1.0 (fix by FIVE)
 			1.0.0 -
-				- Renamed plugin to 'SimpleStealth'
 				- Removed Fake Disconnect / Connect (Now it wont show any messages)
 					- I will attempt to fix this later but it has been very problematic, causing issues with radar, event messages showing 'Unconnected' etc.
 				- Remove SteamTools support - Use SteamWorks already!
 				- Remove Updater support.
 				- Fixed PTaH hook.
 				- Fixed 'version' in status.
-				- Improved SetTransmit performance when using 'sm_simplestealth_hidecheats' by only hooking stealthed clients.
+				- Improved SetTransmit performance when using 'sm_stealthrevived_hidecheats' by only hooking stealthed clients.
 				- Removed 'status' cmd interval ConVar to keep things simple.
 				- General fixes.
 				
@@ -55,7 +54,7 @@
 *****************************************************************************************************
 	INCLUDES
 *****************************************************************************************************/
-#include <SimpleStealth>
+#include <StealthRevived>
 #include <sdktools>
 #include <sdkhooks>
 #include <regex>
@@ -82,7 +81,7 @@
 	PLUGIN INFO.
 *****************************************************************************************************/
 public Plugin myinfo =  {
-	name = "Simple Stealth", 
+	name = "Stealth Revived", 
 	author = "SM9();", 
 	description = "Just another Stealth plugin.", 
 	version = PL_VERSION, 
@@ -133,12 +132,12 @@ char g_sServerSteamId[24];
 char g_sTags[128];
 
 public void OnPluginStart() {
-	AutoExecConfig_SetFile("SimpleStealth", "SM9");
+	AutoExecConfig_SetFile("StealthRevived", "SM9");
 	
-	g_cvCustomStatus = AutoExecConfig_CreateConVar("sm_simplestealth_status", "1", "Should the plugin rewrite status?", _, true, 0.0, true, 1.0);
+	g_cvCustomStatus = AutoExecConfig_CreateConVar("sm_stealthrevived_status", "1", "Should the plugin rewrite status?", _, true, 0.0, true, 1.0);
 	g_cvCustomStatus.AddChangeHook(OnCvarChanged);
 	
-	g_cvSetTransmit = AutoExecConfig_CreateConVar("sm_simplestealth_hidecheats", "1", "Should the plugin prevent cheats with 'spectator list' working? (This option may cause performance issues on some servers)", _, true, 0.0, true, 1.0);
+	g_cvSetTransmit = AutoExecConfig_CreateConVar("sm_stealthrevived_hidecheats", "1", "Should the plugin prevent cheats with 'spectator list' working? (This option may cause performance issues on some servers)", _, true, 0.0, true, 1.0);
 	g_cvSetTransmit.AddChangeHook(OnCvarChanged);
 	
 	AutoExecConfig_CleanFile(); AutoExecConfig_ExecuteFile();
@@ -177,8 +176,8 @@ public void OnPluginStart() {
 }
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] eror, int err_max) {
-	RegPluginLibrary("SimpleStealth");
-	CreateNative("SS_IsClientStealthed", Native_IsClientStealthed);
+	RegPluginLibrary("StealthRevived");
+	CreateNative("SR_IsClientStealthed", Native_IsClientStealthed);
 	return APLRes_Success;
 }
 

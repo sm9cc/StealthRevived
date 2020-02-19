@@ -49,6 +49,8 @@
 				- Improved SetTransmit performance when using 'sm_stealthrevived_hidecheats' by only hooking stealthed clients.
 				- Removed 'status' cmd interval ConVar to keep things simple.
 				- General fixes.
+			1.0.1 -
+				- Fix bad logic in status command hook.
 				
 *****************************************************************************************************
 *****************************************************************************************************
@@ -67,7 +69,7 @@
 /****************************************************************************************************
 	DEFINES
 *****************************************************************************************************/
-#define PL_VERSION "1.0.0"
+#define PL_VERSION "1.0.1"
 #define LoopValidPlayers(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1))
 #define LoopValidClients(%1) for(int %1 = 1; %1 <= MaxClients; %1++) if(IsValidClient(%1, false))
 
@@ -111,7 +113,7 @@ bool g_bPTaH = false;
 /****************************************************************************************************
 	INTS.
 *****************************************************************************************************/
-int g_iLastCommand[MAXPLAYERS + 1];
+int g_iLastStatusCommand[MAXPLAYERS + 1];
 int g_iTickRate = 0;
 int g_iServerPort = 0;
 int g_iPlayerManager = -1;
@@ -235,50 +237,35 @@ public void OnMapStart() {
 	}
 }
 
-public Action Command_Status(int client, const char[] sCommand, int args) {
-	if (client < 1) {
-		return Plugin_Continue;
-	}
-	
-	if (g_iLastCommand[client] > -1 && GetTime() - g_iLastCommand[client] < 1) {
-		return Plugin_Handled;
-	}
-	
-	if (!g_bRewriteStatus) {
+public Action Command_Status(int client, const char[] commandName, int args) {
+	if (!client || !g_bRewriteStatus) {
 		return Plugin_Continue;
 	}
 	
 	ExecuteStringCommand(client, "status");
-	
 	return Plugin_Handled;
 }
 
-public Action ExecuteStringCommand(int client, char message[1024]) {
-	if (client < 1 || client > MaxClients) {
+public Action ExecuteStringCommand(int client, char commandName[1024]) {
+	if (!client || !g_bRewriteStatus) {
 		return Plugin_Continue;
 	}
 	
-	if (g_iLastCommand[client] > -1 && GetTime() - g_iLastCommand[client] < 1) {
+	char commandName2[1024];
+	commandName2 = commandName;
+	
+	TrimString(commandName2);
+	
+	if (StrContains(commandName2, "status") != 0) {
+		return Plugin_Continue;
+	}
+	
+	if (!IsClientInGame(client) || (g_iLastStatusCommand[client] > -1 && GetTime() - g_iLastStatusCommand[client] < 1)) {
 		return Plugin_Handled;
 	}
 	
-	if (!g_bRewriteStatus) {
-		return Plugin_Continue;
-	}
-	
-	static char message2[1024]; message2 = message;
-	
-	TrimString(message2);
-	
-	if (StrContains(message2, "status") == -1) {
-		return Plugin_Continue;
-	}
-	
-	if (!IsClientInGame(client)) {
-		return Plugin_Handled;
-	}
-	
-	return PrintCustomStatus(client) ? Plugin_Handled : Plugin_Continue;
+	PrintCustomStatus(client);
+	return Plugin_Handled;
 }
 
 public Action Event_PlayerTeam_Pre(Event event, char[] eventName, bool dontBroadcast) {
@@ -294,6 +281,7 @@ public Action Event_PlayerTeam_Pre(Event event, char[] eventName, bool dontBroad
 		if (g_bStealthed[client]) {
 			event.BroadcastDisabled = true;
 		}
+		
 		g_bStealthed[client] = false;
 		return Plugin_Continue;
 	}
@@ -359,9 +347,8 @@ public Action TF2Events_CallBack(Event event, char[] eventName, bool dontBroadca
 }
 
 public void OnClientDisconnect(int client) {
-	g_iLastCommand[client] = -1;
+	g_iLastStatusCommand[client] = -1;
 	g_bStealthed[client] = false;
-	
 }
 
 public void OnEntityCreated(int entity, const char[] className) {
@@ -404,8 +391,6 @@ public Action Hook_SetTransmit(int entity, int client) {
 }
 
 stock bool PrintCustomStatus(int client) {
-	g_iLastCommand[client] = GetTime();
-	
 	if (!g_bDataCached) {
 		CacheInformation();
 	}
@@ -507,6 +492,8 @@ stock bool PrintCustomStatus(int client) {
 	if (!gameTF2) {
 		PrintToConsole(client, "#end");
 	}
+	
+	g_iLastStatusCommand[client] = GetTime();
 	
 	return true;
 }
